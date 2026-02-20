@@ -2439,7 +2439,7 @@ function SaveDealModal({mode,onSave,onClose}) {
 }
 
 // ─── Deal Card ─────────────────────────────────────────────────────────────────
-function DealCard({deal,onLoad,onDelete}) {
+function SavedDealCard({deal,onLoad,onDelete}) {
   const m=MODES.find(m=>m.key===deal.mode);
   const [confirm,setConfirm]=useState(false);
   const date=new Date(deal.created_at||deal.savedAt).toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"});
@@ -3305,7 +3305,7 @@ function AnalyzerApp({user,profile,onGoHome,onGoProfile,onSignOut}) {
           )}
           {dealsLoading?<div style={{textAlign:"center",padding:"60px",color:"#9ca3af"}}>Loading...</div>
           :deals.length===0?<div style={{textAlign:"center",padding:"80px 24px"}}><div style={{fontSize:52,marginBottom:16}}>🏠</div><h3 style={{fontFamily:"'Fraunces',serif",fontSize:22,fontWeight:800,color:"#111827",marginBottom:8}}>No saved deals yet</h3><p style={{fontSize:14,color:"#6b7280",maxWidth:340,margin:"0 auto 24px"}}>Run an analysis and hit "Save Deal" to build your library.</p><Btn variant="primary" onClick={()=>setView("calc")}>Go to Calculator →</Btn></div>
-          :<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:16}}>{filteredDeals.map(deal=><DealCard key={deal.id} deal={deal} onLoad={handleLoad} onDelete={handleDelete}/>)}</div>}
+          :<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:16}}>{filteredDeals.map(deal=><SavedDealCard key={deal.id} deal={deal} onLoad={handleLoad} onDelete={handleDelete}/>)}</div>}
         </div>
       )}
 
