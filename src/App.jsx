@@ -313,68 +313,530 @@ function AddressBar({value,onChange}) {
 }
 
 // ─── Calculators ───────────────────────────────────────────────────────────────
-function RentalCalc({saved,onCalcChange}) {
+function RentalCalc({saved,onCalcChange,profile}) {
   const [addr,setAddr]=useState(saved?.address||"");
-  const [i,setI]=useState(saved||{pp:320000,down:20,cc:8500,rehab:0,rent:2800,expenses:750,pmt:1420});
+  const [advMode,setAdvMode]=useState(false);
+  const [i,setI]=useState(saved||{
+    pp:320000,down:20,rate:7.5,term:30,cc:8500,rehab:0,rent:2800,
+    taxes:350,insurance:120,vacancy:140,repairs:100,capex:100,mgmt:224,utilities:0,hoa:0,
+    appreciation:3,rentGrowth:2,expenseGrowth:2,
+  });
   const s=k=>v=>setI(p=>({...p,[k]:v}));
-  const c=useMemo(()=>{const da=+i.pp*+i.down/100,ti=da+ +i.cc+ +i.rehab,noi=(+i.rent-+i.expenses)*12,mcf=+i.rent-+i.expenses-+i.pmt,acf=mcf*12;return{da,ti,noi,mcf,acf,cap:+i.pp>0?noi/+i.pp:0,coc:ti>0?acf/ti:0};},[i]);
+
+  const mortgagePmt=useMemo(()=>{
+    const loan=+i.pp*(1-+i.down/100);
+    const r=+i.rate/100/12, n=+i.term*12;
+    if(r===0||n===0) return loan/Math.max(n,1);
+    return loan*(r*Math.pow(1+r,n))/(Math.pow(1+r,n)-1);
+  },[i.pp,i.down,i.rate,i.term]);
+
+  const totalExp=useMemo(()=>+i.taxes+ +i.insurance+ +i.vacancy+ +i.repairs+ +i.capex+ +i.mgmt+ +i.utilities+ +i.hoa,[i]);
+
+  const c=useMemo(()=>{
+    const da=+i.pp*+i.down/100;
+    const ti=da+ +i.cc+ +i.rehab;
+    const noi=(+i.rent-totalExp)*12;
+    const mcf=+i.rent-totalExp-mortgagePmt;
+    const acf=mcf*12;
+    const mcfAfterCapex=mcf-+i.capex;
+    const capRate=+i.pp>0?noi/+i.pp:0;
+    const coc=ti>0?acf/ti:0;
+    const dscr=mortgagePmt>0?(+i.rent-totalExp)/mortgagePmt:0;
+    const beo=(totalExp+mortgagePmt)>0?(totalExp+mortgagePmt)/Math.max(+i.rent,1):0;
+    const risk=mcf>=300?"green":mcf>=0?"yellow":"red";
+    const sens=[
+      {label:"Rent −10%", val:(+i.rent*0.9-totalExp-mortgagePmt)},
+      {label:"Rent −5%",  val:(+i.rent*0.95-totalExp-mortgagePmt)},
+      {label:"Base",       val:mcf},
+      {label:"Vacancy 10%",val:(+i.rent*0.9-totalExp-mortgagePmt)},
+      {label:"Taxes +20%", val:(+i.rent-(totalExp+ +i.taxes*0.2)-mortgagePmt)},
+    ];
+    const proj=[1,5,10,15,20,30].map(yr=>{
+      const rentY=+i.rent*Math.pow(1+i.rentGrowth/100,yr);
+      const expY=totalExp*Math.pow(1+i.expenseGrowth/100,yr);
+      const valY=+i.pp*Math.pow(1+i.appreciation/100,yr);
+      const loanBal=+i.pp*(1-+i.down/100)*(1-yr/(+i.term||30));
+      const equityY=valY-Math.max(loanBal,0);
+      return{yr,rent:Math.round(rentY),val:Math.round(valY),equity:Math.round(equityY),mcf:Math.round(rentY-expY-mortgagePmt)};
+    });
+    return{da,ti,noi,mcf,acf,mcfAfterCapex,capRate,coc,dscr,beo,risk,sens,proj,mortgagePmt};
+  },[i,totalExp,mortgagePmt]);
+
   useEffect(()=>onCalcChange({...i,address:addr},{primary:fmtD(c.mcf),secondary:fmtP(c.coc),label:"Mo. Cash Flow",label2:"CoC ROI"}),[i,c,addr]);
-  return (<><AddressBar value={addr} onChange={setAddr}/>
-    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:28}}>
+
+  const dscrColor=c.dscr>=1.35?"#059669":c.dscr>=1.2?"#d97706":"#dc2626";
+
+  return (<>
+    <AddressBar value={addr} onChange={setAddr}/>
+    <div style={{display:"flex",gap:8,marginBottom:18}}>
+      {[false,true].map(adv=>(
+        <button key={String(adv)} onClick={()=>setAdvMode(adv)} style={{padding:"7px 18px",borderRadius:100,border:`1.5px solid ${advMode===adv?"#10b981":"#e5e7eb"}`,background:advMode===adv?"#f0fdf4":"white",color:advMode===adv?"#059669":"#6b7280",fontSize:12,fontWeight:700,cursor:"pointer"}}>{adv?"Advanced (Projections)":"Basic"}</button>
+      ))}
+    </div>
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:24}}>
       <div style={{display:"flex",flexDirection:"column",gap:10}}>
-        <Divider label="Purchase"/><Field label="Purchase Price" value={i.pp} onChange={s("pp")} prefix="$" step={5000}/><Field label="Down Payment" value={i.down} onChange={s("down")} suffix="%" step={0.5}/><Field label="Closing Costs" value={i.cc} onChange={s("cc")} prefix="$" step={500}/><Field label="Rehab Costs" value={i.rehab} onChange={s("rehab")} prefix="$" step={1000}/>
-        <Divider label="Monthly"/><Field label="Monthly Rent" value={i.rent} onChange={s("rent")} prefix="$" step={50}/><Field label="Monthly Expenses" value={i.expenses} onChange={s("expenses")} prefix="$" step={50}/><Field label="Mortgage Payment" value={i.pmt} onChange={s("pmt")} prefix="$" step={25}/>
+        <Divider label="Purchase"/>
+        <Field label="Purchase Price" value={i.pp} onChange={s("pp")} prefix="$" step={5000}/>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+          <Field label="Down Payment" value={i.down} onChange={s("down")} suffix="%" step={0.5}/>
+          <Field label="Interest Rate" value={i.rate} onChange={s("rate")} suffix="%" step={0.125}/>
+          <Field label="Loan Term" value={i.term} onChange={s("term")} suffix="yr" step={5}/>
+          <Field label="Closing Costs" value={i.cc} onChange={s("cc")} prefix="$" step={500}/>
+        </div>
+        <Field label="Rehab Costs" value={i.rehab} onChange={s("rehab")} prefix="$" step={1000}/>
+        <Divider label="Income"/>
+        <Field label="Monthly Rent" value={i.rent} onChange={s("rent")} prefix="$" step={50}/>
+        <Divider label="Expenses (monthly)"/>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+          <Field label="Taxes" value={i.taxes} onChange={s("taxes")} prefix="$" step={25}/>
+          <Field label="Insurance" value={i.insurance} onChange={s("insurance")} prefix="$" step={10}/>
+          <Field label="Vacancy" value={i.vacancy} onChange={s("vacancy")} prefix="$" step={25}/>
+          <Field label="Repairs" value={i.repairs} onChange={s("repairs")} prefix="$" step={25}/>
+          <Field label="CapEx" value={i.capex} onChange={s("capex")} prefix="$" step={25}/>
+          <Field label="Mgmt" value={i.mgmt} onChange={s("mgmt")} prefix="$" step={25}/>
+          <Field label="Utilities" value={i.utilities} onChange={s("utilities")} prefix="$" step={25}/>
+          <Field label="HOA" value={i.hoa} onChange={s("hoa")} prefix="$" step={25}/>
+        </div>
+        {advMode&&(<>
+          <Divider label="Growth Assumptions"/>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+            <Field label="Appreciation %" value={i.appreciation} onChange={s("appreciation")} suffix="%" step={0.5}/>
+            <Field label="Rent Growth %" value={i.rentGrowth} onChange={s("rentGrowth")} suffix="%" step={0.5}/>
+            <Field label="Expense %" value={i.expenseGrowth} onChange={s("expenseGrowth")} suffix="%" step={0.5}/>
+          </div>
+        </>)}
       </div>
-      <div style={{display:"flex",flexDirection:"column",gap:14}}>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}><BigResult label="Monthly Cash Flow" value={fmtD(c.mcf)} positive={c.mcf>=0} negative={c.mcf<0}/><BigResult label="Cash-on-Cash ROI" value={fmtP(c.coc)} positive={c.coc>=0.08} negative={c.coc<0}/></div>
-        <div style={{background:"#f9fafb",borderRadius:12,padding:"2px 16px"}}><OutRow label="Annual Cash Flow" value={fmtD(c.acf)} positive={c.acf>=0} negative={c.acf<0}/><OutRow label="Cap Rate" value={fmtP(c.cap)}/><OutRow label="NOI" value={fmtD(c.noi)}/><OutRow label="Total Investment" value={fmtD(c.ti)} highlight/></div>
+
+      <div style={{display:"flex",flexDirection:"column",gap:12}}>
+        {/* Risk badge */}
+        <div style={{display:"flex",alignItems:"center",gap:10,padding:"11px 16px",borderRadius:10,background:c.risk==="green"?"#f0fdf4":c.risk==="yellow"?"#fffbeb":"#fef2f2",border:`1.5px solid ${c.risk==="green"?"#bbf7d0":c.risk==="yellow"?"#fde68a":"#fecaca"}`}}>
+          <span style={{fontSize:18}}>{c.risk==="green"?"✅":c.risk==="yellow"?"⚠️":"🔴"}</span>
+          <div><div style={{fontSize:13,fontWeight:700,color:c.risk==="green"?"#059669":c.risk==="yellow"?"#d97706":"#dc2626"}}>{c.risk==="green"?"Strong Cash Flow":c.risk==="yellow"?"Marginal Deal":"Negative Cash Flow"}</div>
+          <div style={{fontSize:11,color:"#6b7280"}}>Monthly cash flow: {fmtD(c.mcf)}</div></div>
+        </div>
+
+        {/* Auto mortgage callout */}
+        <div style={{background:"#f0fdf4",borderRadius:10,padding:"11px 14px",border:"1.5px solid #bbf7d0",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div><div style={{fontSize:10,fontWeight:700,color:"#6b7280",textTransform:"uppercase",marginBottom:2}}>Auto-Calculated Mortgage</div>
+          <div style={{fontSize:11,color:"#6b7280"}}>{fmtD(+i.pp*(1-+i.down/100))} loan · {i.rate}% · {i.term}yr</div></div>
+          <div style={{fontSize:20,fontWeight:800,fontFamily:"'DM Mono',monospace",color:"#059669"}}>{fmtD(c.mortgagePmt)}<span style={{fontSize:11,color:"#9ca3af",fontWeight:400}}>/mo</span></div>
+        </div>
+
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+          <BigResult label="Monthly Cash Flow" value={fmtD(c.mcf)} positive={c.mcf>=0} negative={c.mcf<0}/>
+          <BigResult label="Cash-on-Cash ROI" value={fmtP(c.coc)} positive={c.coc>=0.08} negative={c.coc<0}/>
+        </div>
+
+        <div style={{background:"#f9fafb",borderRadius:12,padding:"2px 16px"}}>
+          <OutRow label="Total Expenses/mo" value={fmtD(totalExp)}/>
+          <OutRow label="Annual Cash Flow" value={fmtD(c.acf)} positive={c.acf>=0} negative={c.acf<0}/>
+          <OutRow label="CF after CapEx" value={fmtD(c.mcfAfterCapex)} positive={c.mcfAfterCapex>=0} negative={c.mcfAfterCapex<0}/>
+          <OutRow label="Cap Rate" value={fmtP(c.capRate)}/>
+          <OutRow label="NOI (annual)" value={fmtD(c.noi)}/>
+          <OutRow label="Total Investment" value={fmtD(c.ti)} highlight/>
+        </div>
+
+        {/* Debt metrics */}
+        <div style={{background:"#f9fafb",borderRadius:12,padding:"2px 16px"}}>
+          <div style={{padding:"8px 0",borderBottom:"1px solid #f3f4f6",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <span style={{fontSize:12,color:"#6b7280"}}>DSCR</span>
+            <span style={{fontSize:14,fontWeight:800,fontFamily:"'DM Mono',monospace",color:dscrColor}}>{c.dscr.toFixed(2)}x {c.dscr>=1.35?"✅":c.dscr>=1.2?"⚠️":"🔴"}</span>
+          </div>
+          <OutRow label="Break-Even Occupancy" value={fmtP(c.beo)}/>
+          <OutRow label="Debt Coverage Buffer" value={fmtD(c.mcf)} positive={c.mcf>=0} negative={c.mcf<0}/>
+        </div>
+
+        {/* Sensitivity */}
+        <div style={{background:"#f9fafb",borderRadius:12,padding:"14px 16px"}}>
+          <div style={{fontSize:10,fontWeight:700,color:"#9ca3af",textTransform:"uppercase",marginBottom:10,letterSpacing:"0.06em"}}>Sensitivity / Risk View</div>
+          {c.sens.map((s,idx)=>(
+            <div key={idx} style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+              <span style={{fontSize:12,color:s.label==="Base"?"#374151":"#6b7280",fontWeight:s.label==="Base"?600:400}}>{s.label}</span>
+              <span style={{fontSize:12,fontWeight:700,fontFamily:"'DM Mono',monospace",color:s.val>=0?"#059669":"#dc2626"}}>{fmtD(s.val)}/mo</span>
+            </div>
+          ))}
+        </div>
+
+        {/* Hold projections (advanced only) */}
+        {advMode&&(
+          <div style={{background:"#f9fafb",borderRadius:12,overflow:"hidden"}}>
+            <div style={{padding:"11px 16px",borderBottom:"1px solid #e5e7eb",background:"linear-gradient(135deg,#f0fdf4,#ecfdf5)"}}>
+              <span style={{fontSize:11,fontWeight:700,color:"#059669",textTransform:"uppercase",letterSpacing:"0.06em"}}>Hold Projections</span>
+            </div>
+            <div style={{overflowX:"auto"}}>
+              <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+                <thead><tr style={{background:"#f3f4f6"}}>{["Year","Value","Equity","Rent","CF/mo"].map(h=><th key={h} style={{padding:"7px 10px",textAlign:"right",fontWeight:700,color:"#6b7280",fontSize:9,textTransform:"uppercase"}}>{h}</th>)}</tr></thead>
+                <tbody>{c.proj.map((p,idx)=>(
+                  <tr key={idx} style={{background:idx%2===0?"white":"#fafafa"}}>
+                    <td style={{padding:"7px 10px",fontWeight:700,color:"#374151",textAlign:"right"}}>{p.yr}</td>
+                    <td style={{padding:"7px 10px",textAlign:"right",fontFamily:"'DM Mono',monospace",color:"#059669",fontWeight:600}}>{fmtM(p.val)}</td>
+                    <td style={{padding:"7px 10px",textAlign:"right",fontFamily:"'DM Mono',monospace",color:"#7c3aed",fontWeight:600}}>{fmtM(p.equity)}</td>
+                    <td style={{padding:"7px 10px",textAlign:"right",fontFamily:"'DM Mono',monospace",color:"#374151"}}>{fmtD(p.rent)}</td>
+                    <td style={{padding:"7px 10px",textAlign:"right",fontFamily:"'DM Mono',monospace",color:p.mcf>=0?"#059669":"#dc2626",fontWeight:700}}>{fmtD(p.mcf)}</td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            </div>
+          </div>
+        )}
       </div>
-    </div></>);
+    </div>
+  </>);
 }
 function WholesaleCalc({saved,onCalcChange}) {
   const [addr,setAddr]=useState(saved?.address||"");
-  const [i,setI]=useState(saved||{arv:240000,repairs:28000,pct:70,fee:9000});
+  const [advMode,setAdvMode]=useState(false);
+  const [arvAdj,setArvAdj]=useState(0);
+  const [profitMode,setProfitMode]=useState("fixed");
+  const [i,setI]=useState(saved||{arv:240000,repairs:28000,pct:70,fee:9000,holding:3500,closing:4000,profitTarget:25000,profitPct:10});
   const s=k=>v=>setI(p=>({...p,[k]:v}));
-  const mao=useMemo(()=>+i.arv*+i.pct/100-+i.repairs-+i.fee,[i]);
-  useEffect(()=>onCalcChange({...i,address:addr},{primary:fmtD(mao),secondary:fmtD(+i.fee),label:"MAO",label2:"Your Fee"}),[i,mao,addr]);
-  return (<><AddressBar value={addr} onChange={setAddr}/>
-    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:28}}>
-      <div style={{display:"flex",flexDirection:"column",gap:10}}><Divider label="Deal Details"/><Field label="ARV" value={i.arv} onChange={s("arv")} prefix="$" step={5000}/><Field label="Estimated Repairs" value={i.repairs} onChange={s("repairs")} prefix="$" step={1000}/><Field label="Max Offer %" value={i.pct} onChange={s("pct")} suffix="%" step={1}/><Field label="Wholesale Fee" value={i.fee} onChange={s("fee")} prefix="$" step={500}/></div>
-      <div style={{display:"flex",flexDirection:"column",gap:14}}>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}><BigResult label="Max Allowable Offer" value={fmtD(mao)} positive={mao>0} negative={mao<=0}/><BigResult label="Your Fee" value={fmtD(+i.fee)} positive/></div>
-        <div style={{background:"#f9fafb",borderRadius:12,padding:"2px 16px"}}><OutRow label="ARV" value={fmtD(+i.arv)}/><OutRow label={`ARV × ${i.pct}%`} value={fmtD(+i.arv*+i.pct/100)}/><OutRow label="Minus Repairs" value={`−${fmtD(+i.repairs)}`}/><OutRow label="Minus Fee" value={`−${fmtD(+i.fee)}`}/><OutRow label="MAO" value={fmtD(mao)} positive={mao>0} negative={mao<=0} highlight/></div>
+
+  const adjArv=useMemo(()=>+i.arv*(1+arvAdj/100),[i.arv,arvAdj]);
+
+  const c=useMemo(()=>{
+    let mao;
+    if(!advMode){
+      mao=adjArv*+i.pct/100-+i.repairs-+i.fee;
+    } else {
+      const profitAmt=profitMode==="pct"?adjArv*+i.profitPct/100:+i.profitTarget;
+      mao=adjArv-+i.repairs-+i.holding-+i.closing-profitAmt-+i.fee;
+    }
+    const spread=adjArv-mao;
+    const investorMargin=adjArv-mao-+i.repairs;
+    const feeOfSpread=spread>0?+i.fee/spread:0;
+    const marginPct=adjArv>0?mao/adjArv:0;
+    const strength=mao>0&&marginPct>0.45?"green":mao>0?"yellow":"red";
+    return{mao,spread,investorMargin,feeOfSpread,strength,adjArv,marginPct};
+  },[i,advMode,arvAdj,profitMode]);
+
+  useEffect(()=>onCalcChange({...i,address:addr},{primary:fmtD(c.mao),secondary:fmtD(+i.fee),label:"MAO",label2:"Your Fee"}),[i,c,addr]);
+
+  return (<>
+    <AddressBar value={addr} onChange={setAddr}/>
+    {/* Mode toggle */}
+    <div style={{display:"flex",gap:8,marginBottom:16}}>
+      {[[false,"Basic (70% Rule)"],[true,"Advanced Mode"]].map(([adv,label])=>(
+        <button key={String(adv)} onClick={()=>setAdvMode(adv)} style={{padding:"7px 18px",borderRadius:100,border:`1.5px solid ${advMode===adv?"#2563eb":"#e5e7eb"}`,background:advMode===adv?"#eff6ff":"white",color:advMode===adv?"#2563eb":"#6b7280",fontSize:12,fontWeight:700,cursor:"pointer"}}>{label}</button>
+      ))}
+    </div>
+    {/* ARV Sensitivity */}
+    <div style={{background:"#eff6ff",borderRadius:10,padding:"12px 16px",border:"1.5px solid #bfdbfe",marginBottom:18}}>
+      <div style={{fontSize:10,fontWeight:700,color:"#2563eb",textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:8}}>ARV Sensitivity</div>
+      <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+        {[[-10,"−10%"],[-5,"−5%"],[0,"Base"],[5,"+5%"]].map(([val,label])=>(
+          <button key={val} onClick={()=>setArvAdj(val)} style={{padding:"5px 14px",borderRadius:100,border:`1.5px solid ${arvAdj===val?"#2563eb":"#bfdbfe"}`,background:arvAdj===val?"#2563eb":"white",color:arvAdj===val?"white":"#2563eb",fontSize:12,fontWeight:700,cursor:"pointer"}}>{label}</button>
+        ))}
       </div>
-    </div></>);
+      {arvAdj!==0&&<div style={{fontSize:11,color:"#2563eb",marginTop:6,fontWeight:600}}>Adjusted ARV: {fmtD(c.adjArv)} ({arvAdj>0?"+":""}{arvAdj}% from stated)</div>}
+    </div>
+
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:24}}>
+      <div style={{display:"flex",flexDirection:"column",gap:10}}>
+        <Divider label="Deal Details"/>
+        <Field label="ARV" value={i.arv} onChange={s("arv")} prefix="$" step={5000}/>
+        <Field label="Estimated Repairs" value={i.repairs} onChange={s("repairs")} prefix="$" step={1000}/>
+        <Field label="Wholesale Fee" value={i.fee} onChange={s("fee")} prefix="$" step={500}/>
+        {!advMode&&<Field label="Max Offer %" value={i.pct} onChange={s("pct")} suffix="%" step={1}/>}
+        {advMode&&(<>
+          <Divider label="Advanced Costs"/>
+          <Field label="Holding Costs" value={i.holding} onChange={s("holding")} prefix="$" step={500}/>
+          <Field label="Closing Costs" value={i.closing} onChange={s("closing")} prefix="$" step={500}/>
+          <Divider label="Investor Profit Target"/>
+          <div style={{display:"flex",gap:8,marginBottom:4}}>
+            {[["fixed","Fixed $"],["pct","% of ARV"]].map(([m,label])=>(
+              <button key={m} onClick={()=>setProfitMode(m)} style={{padding:"5px 12px",borderRadius:100,border:`1.5px solid ${profitMode===m?"#2563eb":"#e5e7eb"}`,background:profitMode===m?"#eff6ff":"white",color:profitMode===m?"#2563eb":"#6b7280",fontSize:11,fontWeight:700,cursor:"pointer"}}>{label}</button>
+            ))}
+          </div>
+          {profitMode==="fixed"
+            ?<Field label="Target Investor Profit ($)" value={i.profitTarget} onChange={s("profitTarget")} prefix="$" step={1000}/>
+            :<Field label="Target Investor Profit (%)" value={i.profitPct} onChange={s("profitPct")} suffix="%" step={1}/>
+          }
+        </>)}
+      </div>
+
+      <div style={{display:"flex",flexDirection:"column",gap:14}}>
+        {/* Strength indicator */}
+        <div style={{padding:"12px 16px",borderRadius:10,background:c.strength==="green"?"#f0fdf4":c.strength==="yellow"?"#fffbeb":"#fef2f2",border:`1.5px solid ${c.strength==="green"?"#bbf7d0":c.strength==="yellow"?"#fde68a":"#fecaca"}`,display:"flex",alignItems:"center",gap:10}}>
+          <span style={{fontSize:20}}>{c.strength==="green"?"💪":c.strength==="yellow"?"⚠️":"❌"}</span>
+          <div>
+            <div style={{fontSize:13,fontWeight:700,color:c.strength==="green"?"#059669":c.strength==="yellow"?"#d97706":"#dc2626"}}>{c.strength==="green"?"Strong Wholesale Deal":c.strength==="yellow"?"Thin Margin":"Deal Doesn't Work"}</div>
+            <div style={{fontSize:11,color:"#6b7280"}}>MAO is {fmtP(c.marginPct)} of ARV</div>
+          </div>
+        </div>
+
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+          <BigResult label="Max Allowable Offer" value={fmtD(c.mao)} positive={c.mao>0} negative={c.mao<=0}/>
+          <BigResult label="Your Fee" value={fmtD(+i.fee)} positive/>
+        </div>
+
+        <div style={{background:"#f9fafb",borderRadius:12,padding:"2px 16px"}}>
+          <OutRow label="ARV (adjusted)" value={fmtD(c.adjArv)}/>
+          {!advMode&&<OutRow label={`ARV × ${i.pct}%`} value={fmtD(c.adjArv*+i.pct/100)}/>}
+          {advMode&&<>
+            <OutRow label="Minus Repairs" value={`− ${fmtD(+i.repairs)}`}/>
+            <OutRow label="Minus Holding" value={`− ${fmtD(+i.holding)}`}/>
+            <OutRow label="Minus Closing" value={`− ${fmtD(+i.closing)}`}/>
+            <OutRow label="Minus Profit Target" value={`− ${fmtD(profitMode==="pct"?c.adjArv*+i.profitPct/100:+i.profitTarget)}`}/>
+            <OutRow label="Minus Fee" value={`− ${fmtD(+i.fee)}`}/>
+          </>}
+          <OutRow label="Total Spread (ARV − MAO)" value={fmtD(c.spread)}/>
+          <OutRow label="Investor Margin After Repairs" value={fmtD(c.investorMargin)} positive={c.investorMargin>0}/>
+          <OutRow label="Your Fee % of Spread" value={fmtP(c.feeOfSpread)}/>
+          <OutRow label="MAO" value={fmtD(c.mao)} positive={c.mao>0} negative={c.mao<=0} highlight/>
+        </div>
+      </div>
+    </div>
+  </>);
 }
 function FlipCalc({saved,onCalcChange}) {
   const [addr,setAddr]=useState(saved?.address||"");
-  const [i,setI]=useState(saved||{pp:165000,rehab:38000,arv:275000,agent:6,closing:5000,holding:4500,misc:2000});
+  const [financing,setFinancing]=useState("cash");
+  const [targetMode,setTargetMode]=useState("fixed");
+  const [i,setI]=useState(saved||{
+    pp:165000,rehab:38000,arv:275000,months:6,
+    agent:6,closing:5000,
+    taxesMo:200,insuranceMo:150,utilitiesMo:100,
+    targetProfit:40000,targetPct:15,
+    rate:12,points:2,downPct:20,
+  });
   const s=k=>v=>setI(p=>({...p,[k]:v}));
-  const c=useMemo(()=>{const aa=+i.arv*+i.agent/100,tc=+i.pp+ +i.rehab+aa+ +i.closing+ +i.holding+ +i.misc;return{aa,tc,profit:+i.arv-tc,roi:tc>0?(+i.arv-tc)/tc:0};},[i]);
-  useEffect(()=>onCalcChange({...i,address:addr},{primary:fmtD(c.profit),secondary:fmtP(c.roi),label:"Net Profit",label2:"ROI"}),[i,c,addr]);
-  return (<><AddressBar value={addr} onChange={setAddr}/>
-    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:28}}>
-      <div style={{display:"flex",flexDirection:"column",gap:10}}><Divider label="Acquisition"/><Field label="Purchase Price" value={i.pp} onChange={s("pp")} prefix="$" step={5000}/><Field label="Rehab Costs" value={i.rehab} onChange={s("rehab")} prefix="$" step={1000}/><Field label="ARV" value={i.arv} onChange={s("arv")} prefix="$" step={5000}/><Divider label="Selling Costs"/><Field label="Agent Fees" value={i.agent} onChange={s("agent")} suffix="%" step={0.5}/><Field label="Closing Costs" value={i.closing} onChange={s("closing")} prefix="$" step={500}/><Field label="Holding Costs" value={i.holding} onChange={s("holding")} prefix="$" step={500}/><Field label="Misc" value={i.misc} onChange={s("misc")} prefix="$" step={500}/></div>
-      <div style={{display:"flex",flexDirection:"column",gap:14}}>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}><BigResult label="Net Profit" value={fmtD(c.profit)} positive={c.profit>0} negative={c.profit<=0}/><BigResult label="ROI" value={fmtP(c.roi)} positive={c.roi>0.15} negative={c.roi<=0}/></div>
-        <div style={{background:"#f9fafb",borderRadius:12,padding:"2px 16px"}}><OutRow label="Purchase + Rehab" value={fmtD(+i.pp+ +i.rehab)}/><OutRow label="Agent Fees" value={fmtD(c.aa)}/><OutRow label="Other Costs" value={fmtD(+i.closing+ +i.holding+ +i.misc)}/><OutRow label="Net Profit" value={fmtD(c.profit)} positive={c.profit>0} negative={c.profit<=0} highlight/></div>
+
+  const c=useMemo(()=>{
+    const agentAmt=+i.arv*+i.agent/100;
+    const holdingTotal=(+i.taxesMo+ +i.insuranceMo+ +i.utilitiesMo)*+i.months;
+    let financingCost=0;
+    if(financing!=="cash"){
+      const loanAmt=+i.pp*(1-+i.downPct/100);
+      financingCost=loanAmt*+i.points/100 + loanAmt*+i.rate/100/12*+i.months;
+    }
+    const totalCost=+i.pp+ +i.rehab+agentAmt+ +i.closing+holdingTotal+financingCost;
+    const profit=+i.arv-totalCost;
+    const roi=totalCost>0?profit/totalCost:0;
+    const annRoi=+i.months>0?roi*(12/+i.months):roi;
+    const profitPctArv=+i.arv>0?profit/+i.arv:0;
+    const targetAmt=targetMode==="pct"?+i.arv*+i.targetPct/100:+i.targetProfit;
+    const meetsTarget=profit>=targetAmt;
+    const risk=profitPctArv>=0.15?"green":profitPctArv>=0.10?"yellow":"red";
+    const breakeven=totalCost;
+    const reqForTarget=totalCost+targetAmt;
+    return{agentAmt,holdingTotal,financingCost,totalCost,profit,roi,annRoi,profitPctArv,targetAmt,meetsTarget,risk,breakeven,reqForTarget};
+  },[i,financing,targetMode]);
+
+  useEffect(()=>onCalcChange({...i,address:addr},{primary:fmtD(c.profit),secondary:fmtP(c.annRoi),label:"Net Profit",label2:"Ann. ROI"}),[i,c,addr]);
+
+  return (<>
+    <AddressBar value={addr} onChange={setAddr}/>
+    {/* Financing toggle */}
+    <div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"}}>
+      {[["cash","💵 Cash"],["hard","🏦 Hard Money"],["private","🤝 Private Money"],["conventional","🏠 Conventional"]].map(([k,label])=>(
+        <button key={k} onClick={()=>setFinancing(k)} style={{padding:"7px 14px",borderRadius:100,border:`1.5px solid ${financing===k?"#d97706":"#e5e7eb"}`,background:financing===k?"#fffbeb":"white",color:financing===k?"#d97706":"#6b7280",fontSize:12,fontWeight:700,cursor:"pointer"}}>{label}</button>
+      ))}
+    </div>
+
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:24}}>
+      <div style={{display:"flex",flexDirection:"column",gap:10}}>
+        <Divider label="Acquisition"/>
+        <Field label="Purchase Price" value={i.pp} onChange={s("pp")} prefix="$" step={5000}/>
+        <Field label="Rehab Costs" value={i.rehab} onChange={s("rehab")} prefix="$" step={1000}/>
+        <Field label="ARV" value={i.arv} onChange={s("arv")} prefix="$" step={5000}/>
+        <Field label="Project Duration" value={i.months} onChange={s("months")} suffix="mo" step={1}/>
+
+        {financing!=="cash"&&(<>
+          <Divider label="Financing Costs"/>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+            <Field label="Interest Rate" value={i.rate} onChange={s("rate")} suffix="%" step={0.5}/>
+            <Field label="Points" value={i.points} onChange={s("points")} suffix="pts" step={0.5}/>
+            <Field label="Down Payment" value={i.downPct} onChange={s("downPct")} suffix="%" step={5}/>
+          </div>
+        </>)}
+
+        <Divider label="Selling Costs"/>
+        <Field label="Agent Fees" value={i.agent} onChange={s("agent")} suffix="%" step={0.5}/>
+        <Field label="Closing Costs" value={i.closing} onChange={s("closing")} prefix="$" step={500}/>
+
+        <Divider label="Monthly Holding Costs"/>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+          <Field label="Taxes/mo" value={i.taxesMo} onChange={s("taxesMo")} prefix="$" step={50}/>
+          <Field label="Insurance/mo" value={i.insuranceMo} onChange={s("insuranceMo")} prefix="$" step={25}/>
+          <Field label="Utilities/mo" value={i.utilitiesMo} onChange={s("utilitiesMo")} prefix="$" step={25}/>
+        </div>
+
+        <Divider label="Target Profit"/>
+        <div style={{display:"flex",gap:8,marginBottom:4}}>
+          {[["fixed","Fixed $"],["pct","% of ARV"]].map(([m,label])=>(
+            <button key={m} onClick={()=>setTargetMode(m)} style={{padding:"5px 12px",borderRadius:100,border:`1.5px solid ${targetMode===m?"#d97706":"#e5e7eb"}`,background:targetMode===m?"#fffbeb":"white",color:targetMode===m?"#d97706":"#6b7280",fontSize:11,fontWeight:700,cursor:"pointer"}}>{label}</button>
+          ))}
+        </div>
+        {targetMode==="fixed"
+          ?<Field label="Target Profit ($)" value={i.targetProfit} onChange={s("targetProfit")} prefix="$" step={1000}/>
+          :<Field label="Target Profit (% of ARV)" value={i.targetPct} onChange={s("targetPct")} suffix="%" step={1}/>
+        }
       </div>
-    </div></>);
+
+      <div style={{display:"flex",flexDirection:"column",gap:12}}>
+        {/* Risk + target badge */}
+        <div style={{padding:"12px 16px",borderRadius:10,background:c.risk==="green"?"#f0fdf4":c.risk==="yellow"?"#fffbeb":"#fef2f2",border:`1.5px solid ${c.risk==="green"?"#bbf7d0":c.risk==="yellow"?"#fde68a":"#fecaca"}`,display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            <span style={{fontSize:18}}>{c.risk==="green"?"✅":c.risk==="yellow"?"⚠️":"🔴"}</span>
+            <div>
+              <div style={{fontSize:13,fontWeight:700,color:c.risk==="green"?"#059669":c.risk==="yellow"?"#d97706":"#dc2626"}}>{c.risk==="green"?"Strong Flip":c.risk==="yellow"?"Thin Margin":"Weak Deal"}</div>
+              <div style={{fontSize:11,color:"#6b7280"}}>Profit = {fmtP(c.profitPctArv)} of ARV</div>
+            </div>
+          </div>
+          <div style={{textAlign:"right"}}>
+            <div style={{fontSize:12,fontWeight:700,color:c.meetsTarget?"#059669":"#dc2626"}}>{c.meetsTarget?"✅ Meets Target":"❌ Below Target"}</div>
+            <div style={{fontSize:10,color:"#9ca3af"}}>Target: {fmtD(c.targetAmt)}</div>
+          </div>
+        </div>
+
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+          <BigResult label="Net Profit" value={fmtD(c.profit)} positive={c.profit>0} negative={c.profit<=0}/>
+          <BigResult label="Annualized ROI" value={fmtP(c.annRoi)} positive={c.annRoi>0.20} negative={c.annRoi<=0}/>
+        </div>
+
+        <div style={{background:"#f9fafb",borderRadius:12,padding:"2px 16px"}}>
+          <OutRow label="Purchase + Rehab" value={fmtD(+i.pp+ +i.rehab)}/>
+          <OutRow label="Agent Fees" value={fmtD(c.agentAmt)}/>
+          <OutRow label={`Holding (${i.months} mo)`} value={fmtD(c.holdingTotal)}/>
+          {financing!=="cash"&&<OutRow label="Financing Cost" value={fmtD(c.financingCost)}/>}
+          <OutRow label="Total Cost" value={fmtD(c.totalCost)}/>
+          <OutRow label="Raw ROI" value={fmtP(c.roi)}/>
+          <OutRow label="Profit % of ARV" value={fmtP(c.profitPctArv)} positive={c.profitPctArv>=0.15}/>
+          <OutRow label="Net Profit" value={fmtD(c.profit)} positive={c.profit>0} negative={c.profit<=0} highlight/>
+        </div>
+
+        <div style={{background:"#fffbeb",borderRadius:10,padding:"14px 16px",border:"1.5px solid #fde68a"}}>
+          <div style={{fontSize:10,fontWeight:700,color:"#92400e",textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:10}}>Decision Metrics</div>
+          <div style={{display:"flex",justifyContent:"space-between",marginBottom:7}}><span style={{fontSize:12,color:"#6b7280"}}>Breakeven Sale Price</span><span style={{fontSize:13,fontWeight:700,fontFamily:"'DM Mono',monospace",color:"#374151"}}>{fmtD(c.breakeven)}</span></div>
+          <div style={{display:"flex",justifyContent:"space-between"}}><span style={{fontSize:12,color:"#6b7280"}}>Required Sale for Target</span><span style={{fontSize:13,fontWeight:700,fontFamily:"'DM Mono',monospace",color:"#374151"}}>{fmtD(c.reqForTarget)}</span></div>
+        </div>
+      </div>
+    </div>
+  </>);
 }
 function BRRRRCalc({saved,onCalcChange}) {
   const [addr,setAddr]=useState(saved?.address||"");
-  const [i,setI]=useState(saved||{pp:110000,rehab:45000,arv:210000,refPct:75,rent:1750,expenses:780});
+  const [i,setI]=useState(saved||{
+    pp:110000,rehab:45000,arv:210000,
+    stabilizeMonths:4,holdingMo:600,
+    refPct:75,refiRate:7.0,refiTerm:30,refiPoints:1,refiClosing:3500,
+    rent:1750,
+    taxes:200,insurance:100,vacancy:88,repairs:88,capex:88,mgmt:140,
+  });
   const s=k=>v=>setI(p=>({...p,[k]:v}));
-  const c=useMemo(()=>{const ti=+i.pp+ +i.rehab,ra=+i.arv*+i.refPct/100,co=ra-ti,mcf=+i.rent-+i.expenses;return{ti,ra,co,mcf,acf:mcf*12,roi:ti>0?(mcf*12)/ti:0};},[i]);
-  useEffect(()=>onCalcChange({...i,address:addr},{primary:fmtD(c.co),secondary:fmtD(c.mcf),label:"Cash Out",label2:"Mo. Cash Flow"}),[i,c,addr]);
-  return (<><AddressBar value={addr} onChange={setAddr}/>
-    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:28}}>
-      <div style={{display:"flex",flexDirection:"column",gap:10}}><Divider label="Acquisition"/><Field label="Purchase Price" value={i.pp} onChange={s("pp")} prefix="$" step={5000}/><Field label="Rehab Costs" value={i.rehab} onChange={s("rehab")} prefix="$" step={1000}/><Field label="ARV" value={i.arv} onChange={s("arv")} prefix="$" step={5000}/><Field label="Refinance %" value={i.refPct} onChange={s("refPct")} suffix="%" step={1}/><Divider label="Rental"/><Field label="Monthly Rent" value={i.rent} onChange={s("rent")} prefix="$" step={50}/><Field label="Monthly Expenses" value={i.expenses} onChange={s("expenses")} prefix="$" step={50}/></div>
-      <div style={{display:"flex",flexDirection:"column",gap:14}}>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}><BigResult label="Cash Out at Refi" value={fmtD(c.co)} positive={c.co>=0} negative={c.co<0}/><BigResult label="Monthly Cash Flow" value={fmtD(c.mcf)} positive={c.mcf>=0} negative={c.mcf<0}/></div>
-        <div style={{background:"#f9fafb",borderRadius:12,padding:"2px 16px"}}><OutRow label="Total Invested" value={fmtD(c.ti)}/><OutRow label="Refi Amount" value={fmtD(c.ra)}/><OutRow label="Annual Cash Flow" value={fmtD(c.acf)}/><OutRow label="Annual ROI" value={fmtP(c.roi)} positive={c.roi>0.08} highlight/></div>
+
+  const totalExp=useMemo(()=>+i.taxes+ +i.insurance+ +i.vacancy+ +i.repairs+ +i.capex+ +i.mgmt,[i]);
+
+  const c=useMemo(()=>{
+    const holdingCost=+i.holdingMo*+i.stabilizeMonths;
+    const totalIn=+i.pp+ +i.rehab+holdingCost;
+    const refiAmt=+i.arv*+i.refPct/100;
+    const refiCost=refiAmt*+i.refiPoints/100+ +i.refiClosing;
+    const netRefi=refiAmt-refiCost;
+    const cashLeftInDeal=Math.max(0,totalIn-netRefi);
+    const pctRecovered=totalIn>0?Math.min(netRefi/totalIn,1):0;
+    const infiniteReturn=cashLeftInDeal<=0;
+    // refi mortgage
+    const r=+i.refiRate/100/12, n=+i.refiTerm*12;
+    const refiPmt=r===0?refiAmt/n:refiAmt*(r*Math.pow(1+r,n))/(Math.pow(1+r,n)-1);
+    const mcf=+i.rent-totalExp-refiPmt;
+    const acf=mcf*12;
+    const noi=(+i.rent-totalExp)*12;
+    const dscr=refiPmt>0?(+i.rent-totalExp)/refiPmt:0;
+    const forcedEquity=+i.arv-totalIn;
+    const coc=cashLeftInDeal>0?acf/cashLeftInDeal:null;
+    const dscrColor=dscr>=1.35?"#059669":dscr>=1.2?"#d97706":"#dc2626";
+    return{totalIn,holdingCost,refiAmt,refiCost,netRefi,cashLeftInDeal,pctRecovered,infiniteReturn,refiPmt,mcf,acf,noi,dscr,dscrColor,forcedEquity,coc};
+  },[i,totalExp]);
+
+  useEffect(()=>onCalcChange({...i,address:addr},{primary:fmtD(c.cashLeftInDeal===0?c.netRefi-c.totalIn:-(c.cashLeftInDeal)),secondary:fmtD(c.mcf),label:"Cash Left In",label2:"Mo. Cash Flow"}),[i,c,addr]);
+
+  return (<>
+    <AddressBar value={addr} onChange={setAddr}/>
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:24}}>
+      <div style={{display:"flex",flexDirection:"column",gap:10}}>
+        <Divider label="Acquisition"/>
+        <Field label="Purchase Price" value={i.pp} onChange={s("pp")} prefix="$" step={5000}/>
+        <Field label="Rehab Costs" value={i.rehab} onChange={s("rehab")} prefix="$" step={1000}/>
+        <Field label="ARV" value={i.arv} onChange={s("arv")} prefix="$" step={5000}/>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+          <Field label="Stabilize Months" value={i.stabilizeMonths} onChange={s("stabilizeMonths")} suffix="mo" step={1}/>
+          <Field label="Holding Cost/mo" value={i.holdingMo} onChange={s("holdingMo")} prefix="$" step={100}/>
+        </div>
+        <Divider label="Refinance Terms"/>
+        <Field label="Refinance LTV" value={i.refPct} onChange={s("refPct")} suffix="%" step={1}/>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+          <Field label="Refi Rate" value={i.refiRate} onChange={s("refiRate")} suffix="%" step={0.125}/>
+          <Field label="Refi Term" value={i.refiTerm} onChange={s("refiTerm")} suffix="yr" step={5}/>
+          <Field label="Points" value={i.refiPoints} onChange={s("refiPoints")} suffix="pts" step={0.5}/>
+          <Field label="Closing Costs" value={i.refiClosing} onChange={s("refiClosing")} prefix="$" step={500}/>
+        </div>
+        <Divider label="Rental Income"/>
+        <Field label="Monthly Rent" value={i.rent} onChange={s("rent")} prefix="$" step={50}/>
+        <Divider label="Expenses (monthly)"/>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+          <Field label="Taxes" value={i.taxes} onChange={s("taxes")} prefix="$" step={25}/>
+          <Field label="Insurance" value={i.insurance} onChange={s("insurance")} prefix="$" step={10}/>
+          <Field label="Vacancy" value={i.vacancy} onChange={s("vacancy")} prefix="$" step={25}/>
+          <Field label="Repairs" value={i.repairs} onChange={s("repairs")} prefix="$" step={25}/>
+          <Field label="CapEx" value={i.capex} onChange={s("capex")} prefix="$" step={25}/>
+          <Field label="Mgmt" value={i.mgmt} onChange={s("mgmt")} prefix="$" step={25}/>
+        </div>
       </div>
-    </div></>);
+
+      <div style={{display:"flex",flexDirection:"column",gap:12}}>
+        {/* THE BRRRR metric — cash left in deal */}
+        <div style={{borderRadius:14,padding:"18px 20px",background:c.infiniteReturn?"linear-gradient(135deg,#064e3b,#065f46)":"#f9fafb",border:`1.5px solid ${c.infiniteReturn?"transparent":c.cashLeftInDeal<10000?"#bbf7d0":"#e5e7eb"}`}}>
+          <div style={{fontSize:10,fontWeight:700,color:c.infiniteReturn?"rgba(255,255,255,0.6)":"#9ca3af",textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:6}}>Cash Left In Deal</div>
+          <div style={{fontSize:28,fontWeight:800,fontFamily:"'DM Mono',monospace",color:c.infiniteReturn?"#6ee7b7":c.cashLeftInDeal===0?"#059669":"#374151"}}>
+            {c.infiniteReturn?"$0 — Fully Recycled 🎯":fmtD(c.cashLeftInDeal)}
+          </div>
+          <div style={{fontSize:12,color:c.infiniteReturn?"rgba(255,255,255,0.65)":"#6b7280",marginTop:4}}>
+            {c.infiniteReturn?"∞ Infinite return — all capital recovered!":
+            `${fmtP(c.pctRecovered)} of capital recovered`}
+          </div>
+        </div>
+
+        {/* Forced equity */}
+        <div style={{background:"#f5f3ff",borderRadius:10,padding:"12px 16px",border:"1.5px solid #ddd6fe",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div>
+            <div style={{fontSize:10,fontWeight:700,color:"#7c3aed",textTransform:"uppercase",marginBottom:2}}>Forced Equity Created</div>
+            <div style={{fontSize:11,color:"#6b7280"}}>ARV − Total Invested</div>
+          </div>
+          <div style={{fontSize:22,fontWeight:800,fontFamily:"'DM Mono',monospace",color:"#7c3aed"}}>{fmtD(c.forcedEquity)}</div>
+        </div>
+
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+          <BigResult label="Monthly Cash Flow" value={fmtD(c.mcf)} positive={c.mcf>=0} negative={c.mcf<0}/>
+          <BigResult label="Refi Mortgage" value={fmtD(c.refiPmt)}/>
+        </div>
+
+        {/* Transparent cost stack */}
+        <div style={{background:"#f9fafb",borderRadius:12,padding:"2px 16px"}}>
+          <div style={{padding:"8px 0",borderBottom:"1px solid #f3f4f6"}}><span style={{fontSize:11,fontWeight:700,color:"#374151"}}>Total Invested Breakdown</span></div>
+          <OutRow label="  Purchase" value={fmtD(+i.pp)}/>
+          <OutRow label="  Rehab" value={fmtD(+i.rehab)}/>
+          <OutRow label={`  Holding (${i.stabilizeMonths}mo)`} value={fmtD(c.holdingCost)}/>
+          <OutRow label="Total Invested" value={fmtD(c.totalIn)} highlight/>
+          <OutRow label="Refi Amount" value={fmtD(c.refiAmt)}/>
+          <OutRow label="Refi Costs (pts+closing)" value={fmtD(c.refiCost)}/>
+          <OutRow label="Net Refi Proceeds" value={fmtD(c.netRefi)}/>
+          <OutRow label="Annual Cash Flow" value={fmtD(c.acf)} positive={c.acf>=0} negative={c.acf<0}/>
+          <OutRow label="Cash-on-Cash ROI" value={c.coc===null?"∞ (infinite)":fmtP(c.coc)} positive/>
+        </div>
+
+        {/* DSCR */}
+        <div style={{background:"#f9fafb",borderRadius:12,padding:"2px 16px"}}>
+          <div style={{padding:"8px 0",borderBottom:"1px solid #f3f4f6",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <span style={{fontSize:12,color:"#6b7280"}}>DSCR</span>
+            <span style={{fontSize:14,fontWeight:800,fontFamily:"'DM Mono',monospace",color:c.dscrColor}}>{c.dscr.toFixed(2)}x {c.dscr>=1.35?"✅":c.dscr>=1.2?"⚠️":"🔴"}</span>
+          </div>
+          <OutRow label="NOI (annual)" value={fmtD(c.noi)}/>
+          <OutRow label="Total Expenses/mo" value={fmtD(totalExp)}/>
+        </div>
+      </div>
+    </div>
+  </>);
 }
 
 // generate offer letter and download
@@ -402,120 +864,526 @@ function generateAndDownload(type,inputs,calcs,profile) {
 
 function SubToCalc({saved,onCalcChange,profile}) {
   const [addr,setAddr]=useState(saved?.address||"");
-  const [i,setI]=useState(saved||{balance:175000,dp:8000,cc:2500,pmt:1050,rent:1700,expenses:350});
+  const [exitPlan,setExitPlan]=useState("hold");
+  const [i,setI]=useState(saved||{
+    balance:175000,rate:3.5,yearsLeft:25,pmt:1050,
+    dp:8000,cc:2500,
+    marketValue:220000,
+    rent:1700,
+    taxes:180,insurance:90,maintenance:85,vacancy:85,mgmt:136,
+    appreciation:3,exitYears:5,
+  });
   const s=k=>v=>setI(p=>({...p,[k]:v}));
-  const c=useMemo(()=>{const ti=+i.dp+ +i.cc,mcf=+i.rent-+i.pmt-+i.expenses,acf=mcf*12;return{ti,mcf,acf,roi:ti>0?acf/ti:0};},[i]);
+
+  const totalExp=useMemo(()=>+i.taxes+ +i.insurance+ +i.maintenance+ +i.vacancy+ +i.mgmt,[i]);
+
+  const c=useMemo(()=>{
+    const ti=+i.dp+ +i.cc;
+    const equity=+i.marketValue-+i.balance;
+    const equityPct=+i.marketValue>0?equity/+i.marketValue:0;
+    const immediateEquityGain=equity;
+    const mcf=+i.rent-+i.pmt-totalExp;
+    const acf=mcf*12;
+    const roi=ti>0?acf/ti:0;
+    // Exit projection
+    const futureValue=+i.marketValue*Math.pow(1+i.appreciation/100,+i.exitYears);
+    // rough remaining balance at exit (simple amortization approximation)
+    const r=+i.rate/100/12, n=+i.yearsLeft*12;
+    const exitN=Math.max(n-+i.exitYears*12,0);
+    const futureBal=r>0?+i.balance*(Math.pow(1+r,n)-Math.pow(1+r,n-exitN))/(Math.pow(1+r,n)-1):+i.balance*(exitN/n);
+    const futureEquity=futureValue-futureBal;
+    const totalProfit=acf*+i.exitYears+futureEquity-ti;
+    // Risk
+    const risk=mcf>=200?"green":mcf>=0?"yellow":"red";
+    return{ti,equity,equityPct,immediateEquityGain,mcf,acf,roi,futureValue,futureBal,futureEquity,totalProfit,risk};
+  },[i,totalExp]);
+
   useEffect(()=>onCalcChange({...i,address:addr},{primary:fmtD(c.mcf),secondary:fmtP(c.roi),label:"Mo. Cash Flow",label2:"ROI"}),[i,c,addr]);
-  return (<><AddressBar value={addr} onChange={setAddr}/>
-    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:28}}>
-      <div style={{display:"flex",flexDirection:"column",gap:10}}><Divider label="Existing Loan"/><Field label="Loan Balance" value={i.balance} onChange={s("balance")} prefix="$" step={5000}/><Field label="Monthly Mortgage" value={i.pmt} onChange={s("pmt")} prefix="$" step={25}/><Divider label="Your Investment"/><Field label="Down to Seller" value={i.dp} onChange={s("dp")} prefix="$" step={1000}/><Field label="Closing Costs" value={i.cc} onChange={s("cc")} prefix="$" step={500}/><Divider label="Income"/><Field label="Monthly Rent" value={i.rent} onChange={s("rent")} prefix="$" step={50}/><Field label="Monthly Expenses" value={i.expenses} onChange={s("expenses")} prefix="$" step={50}/></div>
-      <div style={{display:"flex",flexDirection:"column",gap:14}}>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}><BigResult label="Monthly Cash Flow" value={fmtD(c.mcf)} positive={c.mcf>=0} negative={c.mcf<0}/><BigResult label="ROI" value={fmtP(c.roi)} positive={c.roi>0.10} negative={c.roi<0}/></div>
-        <div style={{background:"#f9fafb",borderRadius:12,padding:"2px 16px"}}><OutRow label="Total Cash In" value={fmtD(c.ti)}/><OutRow label="Loan Balance" value={fmtD(+i.balance)}/><OutRow label="Annual Cash Flow" value={fmtD(c.acf)} positive={c.acf>=0} negative={c.acf<0} highlight/></div>
-        <button onClick={()=>generateAndDownload("subto",{...i,address:addr},c,profile)} style={{padding:"11px 16px",borderRadius:10,border:"2px dashed #a5f3fc",background:"#ecfeff",color:"#0891b2",fontSize:13,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",gap:8,justifyContent:"center"}}>📄 Generate Subject-To Offer Letter (.doc)</button>
+
+  return (<>
+    <AddressBar value={addr} onChange={setAddr}/>
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:24}}>
+      <div style={{display:"flex",flexDirection:"column",gap:10}}>
+        <Divider label="Existing Loan"/>
+        <Field label="Loan Balance" value={i.balance} onChange={s("balance")} prefix="$" step={5000}/>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+          <Field label="Interest Rate" value={i.rate} onChange={s("rate")} suffix="%" step={0.125}/>
+          <Field label="Years Remaining" value={i.yearsLeft} onChange={s("yearsLeft")} suffix="yr" step={1}/>
+        </div>
+        <Field label="Monthly Mortgage (PITI)" value={i.pmt} onChange={s("pmt")} prefix="$" step={25}/>
+        <Field label="Current Market Value" value={i.marketValue} onChange={s("marketValue")} prefix="$" step={5000}/>
+        <Divider label="Your Investment"/>
+        <Field label="Down to Seller" value={i.dp} onChange={s("dp")} prefix="$" step={1000}/>
+        <Field label="Closing Costs" value={i.cc} onChange={s("cc")} prefix="$" step={500}/>
+        <Divider label="Income"/>
+        <Field label="Monthly Rent" value={i.rent} onChange={s("rent")} prefix="$" step={50}/>
+        <Divider label="Expenses (monthly)"/>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+          <Field label="Taxes" value={i.taxes} onChange={s("taxes")} prefix="$" step={25}/>
+          <Field label="Insurance" value={i.insurance} onChange={s("insurance")} prefix="$" step={10}/>
+          <Field label="Maintenance" value={i.maintenance} onChange={s("maintenance")} prefix="$" step={25}/>
+          <Field label="Vacancy" value={i.vacancy} onChange={s("vacancy")} prefix="$" step={25}/>
+          <Field label="Management" value={i.mgmt} onChange={s("mgmt")} prefix="$" step={25}/>
+        </div>
+        <Divider label="Exit Planning"/>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:4}}>
+          {[["hold","Hold Long-Term"],["refi","Refinance"],["sell","Sell"]].map(([k,label])=>(
+            <button key={k} onClick={()=>setExitPlan(k)} style={{padding:"5px 12px",borderRadius:100,border:`1.5px solid ${exitPlan===k?"#0891b2":"#e5e7eb"}`,background:exitPlan===k?"#ecfeff":"white",color:exitPlan===k?"#0891b2":"#6b7280",fontSize:11,fontWeight:700,cursor:"pointer"}}>{label}</button>
+          ))}
+        </div>
+        {exitPlan!=="hold"&&(
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+            <Field label="Exit in (years)" value={i.exitYears} onChange={s("exitYears")} suffix="yr" step={1}/>
+            <Field label="Appreciation %" value={i.appreciation} onChange={s("appreciation")} suffix="%" step={0.5}/>
+          </div>
+        )}
       </div>
-    </div></>);
+
+      <div style={{display:"flex",flexDirection:"column",gap:12}}>
+        {/* Risk badge */}
+        <div style={{display:"flex",alignItems:"center",gap:10,padding:"11px 16px",borderRadius:10,background:c.risk==="green"?"#f0fdf4":c.risk==="yellow"?"#fffbeb":"#fef2f2",border:`1.5px solid ${c.risk==="green"?"#bbf7d0":c.risk==="yellow"?"#fde68a":"#fecaca"}`}}>
+          <span style={{fontSize:18}}>{c.risk==="green"?"✅":c.risk==="yellow"?"⚠️":"🔴"}</span>
+          <div>
+            <div style={{fontSize:13,fontWeight:700,color:c.risk==="green"?"#059669":c.risk==="yellow"?"#d97706":"#dc2626"}}>{c.risk==="green"?"Strong Sub-To Deal":c.risk==="yellow"?"Marginal Cash Flow":"Negative Cash Flow"}</div>
+            <div style={{fontSize:11,color:"#6b7280"}}>Locked in at {i.rate}% — today's rate is much higher</div>
+          </div>
+        </div>
+
+        {/* Equity position */}
+        <div style={{background:"#ecfeff",borderRadius:10,padding:"14px 16px",border:"1.5px solid #a5f3fc"}}>
+          <div style={{fontSize:10,fontWeight:700,color:"#0891b2",textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:8}}>Equity Position</div>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+            <span style={{fontSize:12,color:"#6b7280"}}>Market Value</span>
+            <span style={{fontSize:13,fontWeight:700,fontFamily:"'DM Mono',monospace",color:"#374151"}}>{fmtD(+i.marketValue)}</span>
+          </div>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+            <span style={{fontSize:12,color:"#6b7280"}}>Loan Balance</span>
+            <span style={{fontSize:13,fontWeight:700,fontFamily:"'DM Mono',monospace",color:"#374151"}}>− {fmtD(+i.balance)}</span>
+          </div>
+          <div style={{height:1,background:"#a5f3fc",margin:"6px 0"}}/>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <span style={{fontSize:13,fontWeight:700,color:"#0891b2"}}>Immediate Equity</span>
+            <span style={{fontSize:18,fontWeight:800,fontFamily:"'DM Mono',monospace",color:"#0891b2"}}>{fmtD(c.equity)} <span style={{fontSize:12}}>({fmtP(c.equityPct)})</span></span>
+          </div>
+        </div>
+
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+          <BigResult label="Monthly Cash Flow" value={fmtD(c.mcf)} positive={c.mcf>=0} negative={c.mcf<0}/>
+          <BigResult label="ROI on Cash In" value={fmtP(c.roi)} positive={c.roi>0.10} negative={c.roi<0}/>
+        </div>
+
+        <div style={{background:"#f9fafb",borderRadius:12,padding:"2px 16px"}}>
+          <OutRow label="Total Cash In" value={fmtD(c.ti)}/>
+          <OutRow label="Total Expenses/mo" value={fmtD(totalExp)}/>
+          <OutRow label="Annual Cash Flow" value={fmtD(c.acf)} positive={c.acf>=0} negative={c.acf<0}/>
+          <OutRow label="ROI = Annual CF / Cash In" value={fmtP(c.roi)} positive={c.roi>0.10} highlight/>
+        </div>
+
+        {/* Exit projection */}
+        {exitPlan!=="hold"&&(
+          <div style={{background:"#f0fdf4",borderRadius:12,padding:"14px 16px",border:"1.5px solid #bbf7d0"}}>
+            <div style={{fontSize:10,fontWeight:700,color:"#059669",textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:10}}>{exitPlan==="refi"?"Refinance":"Sale"} Projection — Year {i.exitYears}</div>
+            <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}><span style={{fontSize:12,color:"#6b7280"}}>Future Value</span><span style={{fontSize:13,fontWeight:700,fontFamily:"'DM Mono',monospace",color:"#059669"}}>{fmtD(c.futureValue)}</span></div>
+            <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}><span style={{fontSize:12,color:"#6b7280"}}>Remaining Loan</span><span style={{fontSize:13,fontWeight:700,fontFamily:"'DM Mono',monospace",color:"#374151"}}>{fmtD(c.futureBal)}</span></div>
+            <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}><span style={{fontSize:12,color:"#6b7280"}}>Future Equity</span><span style={{fontSize:13,fontWeight:700,fontFamily:"'DM Mono',monospace",color:"#059669"}}>{fmtD(c.futureEquity)}</span></div>
+            <div style={{height:1,background:"#bbf7d0",margin:"6px 0"}}/>
+            <div style={{display:"flex",justifyContent:"space-between"}}><span style={{fontSize:13,fontWeight:700,color:"#059669"}}>Total Profit (CF + Equity)</span><span style={{fontSize:15,fontWeight:800,fontFamily:"'DM Mono',monospace",color:"#059669"}}>{fmtD(c.totalProfit)}</span></div>
+          </div>
+        )}
+
+        <button onClick={()=>generateAndDownload("subto",{...i,address:addr},c,profile)} style={{padding:"11px 16px",borderRadius:10,border:"2px dashed #a5f3fc",background:"#ecfeff",color:"#0891b2",fontSize:13,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",gap:8,justifyContent:"center"}}>
+          📄 Generate Subject-To Offer Letter (.doc)
+        </button>
+      </div>
+    </div>
+  </>);
 }
 function NovationCalc({saved,onCalcChange,profile}) {
   const [addr,setAddr]=useState(saved?.address||"");
-  const [i,setI]=useState(saved||{pp:155000,repairs:22000,arv:270000,agent:6,closing:4500,sellerPayout:12000,holding:3000,misc:1500});
+  const [saleAdj,setSaleAdj]=useState(100);
+  const [targetMode,setTargetMode]=useState("fixed");
+  const [i,setI]=useState(saved||{
+    pp:155000,repairs:22000,arv:270000,months:4,
+    agent:6,closing:4500,
+    sellerPayout:12000,sellerPayoutType:"cash",
+    taxesMo:180,insuranceMo:120,utilitiesMo:80,
+    targetProfit:40000,targetPct:15,
+  });
   const s=k=>v=>setI(p=>({...p,[k]:v}));
-  const c=useMemo(()=>{const aa=+i.arv*+i.agent/100,tc=+i.pp+ +i.repairs+aa+ +i.closing+ +i.sellerPayout+ +i.holding+ +i.misc;return{aa,tc,profit:+i.arv-tc,roi:tc>0?(+i.arv-tc)/tc:0};},[i]);
-  useEffect(()=>onCalcChange({...i,address:addr},{primary:fmtD(c.profit),secondary:fmtP(c.roi),label:"Net Profit",label2:"ROI"}),[i,c,addr]);
-  return (<><AddressBar value={addr} onChange={setAddr}/>
-    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:28}}>
-      <div style={{display:"flex",flexDirection:"column",gap:10}}><Divider label="Deal"/><Field label="Purchase Price" value={i.pp} onChange={s("pp")} prefix="$" step={5000}/><Field label="Repair Costs" value={i.repairs} onChange={s("repairs")} prefix="$" step={1000}/><Field label="ARV" value={i.arv} onChange={s("arv")} prefix="$" step={5000}/><Divider label="Costs"/><Field label="Agent Fees" value={i.agent} onChange={s("agent")} suffix="%" step={0.5}/><Field label="Closing Costs" value={i.closing} onChange={s("closing")} prefix="$" step={500}/><Field label="Seller Payout" value={i.sellerPayout} onChange={s("sellerPayout")} prefix="$" step={1000}/><Field label="Holding + Misc" value={+i.holding+ +i.misc} onChange={v=>{s("holding")(v*0.6);s("misc")(v*0.4);}} prefix="$" step={500}/></div>
-      <div style={{display:"flex",flexDirection:"column",gap:14}}>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}><BigResult label="Net Profit" value={fmtD(c.profit)} positive={c.profit>0} negative={c.profit<=0}/><BigResult label="ROI" value={fmtP(c.roi)} positive={c.roi>0.15} negative={c.roi<=0}/></div>
-        <div style={{background:"#f9fafb",borderRadius:12,padding:"2px 16px"}}><OutRow label="Total Costs" value={fmtD(c.tc)}/><OutRow label="ARV" value={fmtD(+i.arv)}/><OutRow label="Net Profit" value={fmtD(c.profit)} positive={c.profit>0} negative={c.profit<=0} highlight/></div>
-        <button onClick={()=>generateAndDownload("novation",{...i,address:addr},c,profile)} style={{padding:"11px 16px",borderRadius:10,border:"2px dashed #fbcfe8",background:"#fdf2f8",color:"#be185d",fontSize:13,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",gap:8,justifyContent:"center"}}>📄 Generate Novation Offer Letter (.doc)</button>
+
+  const adjSale=useMemo(()=>+i.arv*saleAdj/100,[i.arv,saleAdj]);
+
+  const c=useMemo(()=>{
+    const agentAmt=adjSale*+i.agent/100;
+    const holdingTotal=(+i.taxesMo+ +i.insuranceMo+ +i.utilitiesMo)*+i.months;
+    const tc=+i.pp+ +i.repairs+agentAmt+ +i.closing+ +i.sellerPayout+holdingTotal;
+    const profit=adjSale-tc;
+    const roi=tc>0?profit/tc:0;
+    const annRoi=+i.months>0?roi*(12/+i.months):roi;
+    const profitPctArv=+i.arv>0?profit/+i.arv:0;
+    const grossSpread=adjSale-+i.pp;
+    const netSpread=adjSale-tc;
+    const targetAmt=targetMode==="pct"?+i.arv*+i.targetPct/100:+i.targetProfit;
+    const meetsTarget=profit>=targetAmt;
+    const risk=profitPctArv>=0.15?"green":profitPctArv>=0.10?"yellow":"red";
+    const breakeven=tc;
+    const reqForTarget=tc+targetAmt;
+    return{agentAmt,holdingTotal,tc,profit,roi,annRoi,profitPctArv,grossSpread,netSpread,targetAmt,meetsTarget,risk,breakeven,reqForTarget,adjSale};
+  },[i,adjSale,targetMode]);
+
+  useEffect(()=>onCalcChange({...i,address:addr},{primary:fmtD(c.profit),secondary:fmtP(c.annRoi),label:"Net Profit",label2:"Ann. ROI"}),[i,c,addr]);
+
+  return (<>
+    <AddressBar value={addr} onChange={setAddr}/>
+
+    {/* Sale price sensitivity */}
+    <div style={{background:"#fdf2f8",borderRadius:10,padding:"12px 16px",border:"1.5px solid #fbcfe8",marginBottom:18}}>
+      <div style={{fontSize:10,fontWeight:700,color:"#be185d",textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:8}}>Sale Price Sensitivity</div>
+      <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+        {[[95,"95% of ARV"],[98,"98% of ARV"],[100,"Full ARV"],[102,"102% of ARV"]].map(([val,label])=>(
+          <button key={val} onClick={()=>setSaleAdj(val)} style={{padding:"5px 14px",borderRadius:100,border:`1.5px solid ${saleAdj===val?"#be185d":"#fbcfe8"}`,background:saleAdj===val?"#be185d":"white",color:saleAdj===val?"white":"#be185d",fontSize:11,fontWeight:700,cursor:"pointer"}}>{label}</button>
+        ))}
       </div>
-    </div></>);
+      {saleAdj!==100&&<div style={{fontSize:11,color:"#be185d",marginTop:6,fontWeight:600}}>Adjusted Sale: {fmtD(c.adjSale)} ({saleAdj}% of ARV)</div>}
+    </div>
+
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:24}}>
+      <div style={{display:"flex",flexDirection:"column",gap:10}}>
+        <Divider label="Deal"/>
+        <Field label="Purchase Price" value={i.pp} onChange={s("pp")} prefix="$" step={5000}/>
+        <Field label="Repair Costs" value={i.repairs} onChange={s("repairs")} prefix="$" step={1000}/>
+        <Field label="ARV" value={i.arv} onChange={s("arv")} prefix="$" step={5000}/>
+        <Field label="Months to Sell" value={i.months} onChange={s("months")} suffix="mo" step={1}/>
+
+        <Divider label="Selling Costs"/>
+        <Field label="Agent Fees" value={i.agent} onChange={s("agent")} suffix="%" step={0.5}/>
+        <Field label="Closing Costs" value={i.closing} onChange={s("closing")} prefix="$" step={500}/>
+
+        <Divider label="Seller Incentive / Payout"/>
+        <div style={{display:"flex",gap:8,marginBottom:4,flexWrap:"wrap"}}>
+          {[["cash","Cash at Close"],["arrears","Cure Arrears"],["incentive","Negotiated Incentive"]].map(([k,label])=>(
+            <button key={k} onClick={()=>s("sellerPayoutType")(k)} style={{padding:"4px 10px",borderRadius:100,border:`1.5px solid ${i.sellerPayoutType===k?"#be185d":"#e5e7eb"}`,background:i.sellerPayoutType===k?"#fdf2f8":"white",color:i.sellerPayoutType===k?"#be185d":"#6b7280",fontSize:11,fontWeight:700,cursor:"pointer"}}>{label}</button>
+          ))}
+        </div>
+        <Field label="Seller Payout Amount" value={i.sellerPayout} onChange={s("sellerPayout")} prefix="$" step={1000}/>
+
+        <Divider label="Monthly Holding Costs"/>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+          <Field label="Taxes/mo" value={i.taxesMo} onChange={s("taxesMo")} prefix="$" step={50}/>
+          <Field label="Insurance/mo" value={i.insuranceMo} onChange={s("insuranceMo")} prefix="$" step={25}/>
+          <Field label="Utilities/mo" value={i.utilitiesMo} onChange={s("utilitiesMo")} prefix="$" step={25}/>
+        </div>
+
+        <Divider label="Target Profit"/>
+        <div style={{display:"flex",gap:8,marginBottom:4}}>
+          {[["fixed","Fixed $"],["pct","% of ARV"]].map(([m,label])=>(
+            <button key={m} onClick={()=>setTargetMode(m)} style={{padding:"5px 12px",borderRadius:100,border:`1.5px solid ${targetMode===m?"#be185d":"#e5e7eb"}`,background:targetMode===m?"#fdf2f8":"white",color:targetMode===m?"#be185d":"#6b7280",fontSize:11,fontWeight:700,cursor:"pointer"}}>{label}</button>
+          ))}
+        </div>
+        {targetMode==="fixed"
+          ?<Field label="Target Profit ($)" value={i.targetProfit} onChange={s("targetProfit")} prefix="$" step={1000}/>
+          :<Field label="Target Profit (% of ARV)" value={i.targetPct} onChange={s("targetPct")} suffix="%" step={1}/>
+        }
+      </div>
+
+      <div style={{display:"flex",flexDirection:"column",gap:12}}>
+        {/* Risk + target badge */}
+        <div style={{padding:"12px 16px",borderRadius:10,background:c.risk==="green"?"#f0fdf4":c.risk==="yellow"?"#fffbeb":"#fef2f2",border:`1.5px solid ${c.risk==="green"?"#bbf7d0":c.risk==="yellow"?"#fde68a":"#fecaca"}`,display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            <span style={{fontSize:18}}>{c.risk==="green"?"✅":c.risk==="yellow"?"⚠️":"🔴"}</span>
+            <div>
+              <div style={{fontSize:13,fontWeight:700,color:c.risk==="green"?"#059669":c.risk==="yellow"?"#d97706":"#dc2626"}}>{c.risk==="green"?"Strong Novation":c.risk==="yellow"?"Thin Margin":"Weak Deal"}</div>
+              <div style={{fontSize:11,color:"#6b7280"}}>Profit = {fmtP(c.profitPctArv)} of ARV</div>
+            </div>
+          </div>
+          <div style={{textAlign:"right"}}>
+            <div style={{fontSize:12,fontWeight:700,color:c.meetsTarget?"#059669":"#dc2626"}}>{c.meetsTarget?"✅ Meets Target":"❌ Below Target"}</div>
+            <div style={{fontSize:10,color:"#9ca3af"}}>Target: {fmtD(c.targetAmt)}</div>
+          </div>
+        </div>
+
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+          <BigResult label="Net Profit" value={fmtD(c.profit)} positive={c.profit>0} negative={c.profit<=0}/>
+          <BigResult label="Annualized ROI" value={fmtP(c.annRoi)} positive={c.annRoi>0.20} negative={c.annRoi<=0}/>
+        </div>
+
+        {/* Transparent cost stack */}
+        <div style={{background:"#f9fafb",borderRadius:12,padding:"2px 16px"}}>
+          <div style={{padding:"8px 0",borderBottom:"1px solid #f3f4f6"}}><span style={{fontSize:11,fontWeight:700,color:"#374151"}}>Total Cost Stack</span></div>
+          <OutRow label="  Purchase Price" value={fmtD(+i.pp)}/>
+          <OutRow label="  Repairs" value={fmtD(+i.repairs)}/>
+          <OutRow label="  Agent Fees" value={fmtD(c.agentAmt)}/>
+          <OutRow label="  Closing Costs" value={fmtD(+i.closing)}/>
+          <OutRow label="  Seller Payout" value={fmtD(+i.sellerPayout)}/>
+          <OutRow label={`  Holding (${i.months}mo)`} value={fmtD(c.holdingTotal)}/>
+          <OutRow label="Total Costs" value={fmtD(c.tc)} highlight/>
+          <OutRow label="Sale Price" value={fmtD(c.adjSale)}/>
+          <OutRow label="Net Profit" value={fmtD(c.profit)} positive={c.profit>0} negative={c.profit<=0} highlight/>
+        </div>
+
+        {/* Spread metrics */}
+        <div style={{background:"#fdf2f8",borderRadius:10,padding:"14px 16px",border:"1.5px solid #fbcfe8"}}>
+          <div style={{fontSize:10,fontWeight:700,color:"#be185d",textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:10}}>Spread Metrics</div>
+          <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}><span style={{fontSize:12,color:"#6b7280"}}>Gross Spread (Sale − Purchase)</span><span style={{fontSize:13,fontWeight:700,fontFamily:"'DM Mono',monospace",color:"#374151"}}>{fmtD(c.grossSpread)}</span></div>
+          <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}><span style={{fontSize:12,color:"#6b7280"}}>Net Spread After All Costs</span><span style={{fontSize:13,fontWeight:700,fontFamily:"'DM Mono',monospace",color:c.netSpread>0?"#059669":"#dc2626"}}>{fmtD(c.netSpread)}</span></div>
+          <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}><span style={{fontSize:12,color:"#6b7280"}}>Profit % of ARV</span><span style={{fontSize:13,fontWeight:700,fontFamily:"'DM Mono',monospace",color:c.profitPctArv>=0.15?"#059669":"#d97706"}}>{fmtP(c.profitPctArv)}</span></div>
+          <div style={{height:1,background:"#fbcfe8",margin:"8px 0"}}/>
+          <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><span style={{fontSize:12,color:"#6b7280"}}>Breakeven Sale Price</span><span style={{fontSize:12,fontWeight:700,fontFamily:"'DM Mono',monospace",color:"#374151"}}>{fmtD(c.breakeven)}</span></div>
+          <div style={{display:"flex",justifyContent:"space-between"}}><span style={{fontSize:12,color:"#6b7280"}}>Required Sale for Target</span><span style={{fontSize:12,fontWeight:700,fontFamily:"'DM Mono',monospace",color:"#374151"}}>{fmtD(c.reqForTarget)}</span></div>
+        </div>
+
+        <button onClick={()=>generateAndDownload("novation",{...i,address:addr},c,profile)} style={{padding:"11px 16px",borderRadius:10,border:"2px dashed #fbcfe8",background:"#fdf2f8",color:"#be185d",fontSize:13,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",gap:8,justifyContent:"center"}}>
+          📄 Generate Novation Offer Letter (.doc)
+        </button>
+      </div>
+    </div>
+  </>);
 }
 
 // ─── Forum ─────────────────────────────────────────────────────────────────────
-function ForumView({user,profile}) {
-  const [posts,setPosts]=useState([]);const [loading,setLoading]=useState(true);const [showNew,setShowNew]=useState(false);
-  const [filterMode,setFilterMode]=useState("all");
-  const [form,setForm]=useState({title:"",mode:"",address:"",question:"",metrics:{}});
-  const [submitting,setSubmitting]=useState(false);const [activePost,setActivePost]=useState(null);
-  const [comments,setComments]=useState([]);const [newComment,setNewComment]=useState("");const [postingComment,setPostingComment]=useState(false);
+// ─── FORUM 2.0 ─────────────────────────────────────────────────────────────────
 
-  const loadPosts=async(m)=>{setLoading(true);const p=await supabase.getPosts(m==="all"?"":m);setPosts(p);setLoading(false);};
+// Strategy-specific feedback prompts
+const FEEDBACK_PROMPTS = {
+  rental: ["Is my cash flow realistic?","Is the rent estimate accurate for this market?","Does the expense ratio look right?","Would you buy this at this price?"],
+  wholesale: ["Is my ARV realistic?","Is the repair estimate too low?","Is MAO competitive in this market?","Would your buyer pay this?"],
+  flip: ["Is my timeline realistic?","Profit margin vs risk — worth it?","What would you cut to protect downside?","Is rehab estimate accurate?"],
+  brrrr: ["Does DSCR work after refi?","How much cash should I leave in?","Does rent support the refi?","Is ARV realistic post-rehab?"],
+  subto: ["Is this rate worth taking over?","Is cash flow strong enough?","Any red flags on this loan?","Exit strategy thoughts?"],
+  novation: ["Is ARV realistic for a retail sale?","Is seller payout too high?","Timeline realistic?","Risk vs reward here?"],
+};
+
+// Deal Card component shown inline in posts
+function DealCard({snapshot, mode, collapsed=true}) {
+  const [open, setOpen] = useState(!collapsed);
+  const m = MODES.find(m=>m.key===mode);
+  if(!snapshot) return null;
+
+  const keyMetrics = {
+    rental: [["Purchase",snapshot.pp],["Rent/mo",snapshot.rent],["CF/mo",snapshot.mcf_display],["CoC ROI",snapshot.coc_display]],
+    wholesale: [["ARV",snapshot.arv],["Repairs",snapshot.repairs],["MAO",snapshot.mao_display],["Your Fee",snapshot.fee]],
+    flip: [["Purchase",snapshot.pp],["Rehab",snapshot.rehab],["ARV",snapshot.arv],["Net Profit",snapshot.profit_display]],
+    brrrr: [["Purchase",snapshot.pp],["Rehab",snapshot.rehab],["ARV",snapshot.arv],["Cash Left",snapshot.cash_left_display]],
+    subto: [["Balance",snapshot.balance],["Rate",snapshot.rate+"%"],["CF/mo",snapshot.mcf_display],["Cash In",snapshot.ti_display]],
+    novation: [["Purchase",snapshot.pp],["Repairs",snapshot.repairs],["ARV",snapshot.arv],["Profit",snapshot.profit_display]],
+  }[mode]||[];
+
+  return (
+    <div style={{background:m?.bg||"#f9fafb",border:`1.5px solid ${m?.border||"#e5e7eb"}`,borderRadius:12,overflow:"hidden",marginBottom:12}}>
+      <button onClick={e=>{e.stopPropagation();setOpen(v=>!v);}} style={{width:"100%",padding:"10px 14px",display:"flex",alignItems:"center",justifyContent:"space-between",background:"none",border:"none",cursor:"pointer"}}>
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          <span style={{fontSize:14}}>{m?.icon}</span>
+          <span style={{fontSize:12,fontWeight:700,color:m?.color||"#374151"}}>{m?.label} Deal</span>
+          {snapshot.address&&<span style={{fontSize:11,color:"#9ca3af"}}>· {snapshot.address}</span>}
+        </div>
+        <span style={{fontSize:11,color:"#9ca3af"}}>{open?"▲ Hide":"▼ Show"} Deal</span>
+      </button>
+      {open&&(
+        <div style={{padding:"0 14px 14px"}}>
+          <div style={{display:"flex",gap:12,flexWrap:"wrap",marginBottom:10}}>
+            {keyMetrics.filter(([,v])=>v).map(([label,val])=>(
+              <div key={label} style={{background:"white",borderRadius:8,padding:"8px 12px",border:`1px solid ${m?.border||"#e5e7eb"}`}}>
+                <div style={{fontSize:9,color:"#9ca3af",fontWeight:700,textTransform:"uppercase",marginBottom:3}}>{label}</div>
+                <div style={{fontSize:14,fontWeight:800,fontFamily:"'DM Mono',monospace",color:m?.color||"#374151"}}>{val||"—"}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Reaction button component
+function ReactionBar({post, onReact, userReaction}) {
+  const reactions = [
+    {type:"solid", label:"✅ Solid", active:"#059669", bg:"#f0fdf4", border:"#bbf7d0"},
+    {type:"tight", label:"⚠️ Tight", active:"#d97706", bg:"#fffbeb", border:"#fde68a"},
+    {type:"pass",  label:"❌ Pass",  active:"#dc2626", bg:"#fef2f2", border:"#fecaca"},
+  ];
+  const counts = post.reactions||{};
+  return (
+    <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+      {reactions.map(r=>{
+        const isActive = userReaction===r.type;
+        const count = counts[r.type]||0;
+        return (
+          <button key={r.type} onClick={e=>{e.stopPropagation();onReact(post,r.type);}}
+            style={{display:"flex",alignItems:"center",gap:5,padding:"5px 12px",borderRadius:100,border:`1.5px solid ${isActive?r.border:"#e5e7eb"}`,background:isActive?r.bg:"white",cursor:"pointer",fontSize:12,fontWeight:isActive?700:500,color:isActive?r.active:"#6b7280",transition:"all 0.15s"}}>
+            {r.label}{count>0&&<span style={{fontSize:11,fontWeight:700,color:isActive?r.active:"#9ca3af"}}>{count}</span>}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function ForumView({user, profile, savedDeals=[]}) {
+  const [posts, setPosts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showNew, setShowNew] = useState(false);
+  const [filterMode, setFilterMode] = useState("all");
+  const [activePost, setActivePost] = useState(null);
+  const [comments, setComments] = useState([]);
+  const [newComment, setNewComment] = useState("");
+  const [postingComment, setPostingComment] = useState(false);
+  const [bestAnswer, setBestAnswer] = useState(null);
+  const [userReactions, setUserReactions] = useState({});
+
+  // New post form state
+  const [postType, setPostType] = useState("deal"); // deal | general
+  const [form, setForm] = useState({title:"", mode:"", question:"", selectedPrompt:"", address:"", locationVisibility:"full", snapshot:null});
+  const [submitting, setSubmitting] = useState(false);
+
+  const loadPosts = async(m) => {
+    setLoading(true);
+    const p = await supabase.getPosts(m==="all"?"":m).catch(()=>[]);
+    setPosts(p);
+    setLoading(false);
+  };
   useEffect(()=>{loadPosts("all");},[]);
 
-  const handleFilter=(m)=>{setFilterMode(m);loadPosts(m);};
+  const handleFilter = (m) => { setFilterMode(m); loadPosts(m); };
 
-  const submit=async()=>{
-    if(!form.title||!form.mode||!form.question)return;
+  // Build snapshot from current calculator state (passed via saved deals)
+  const buildSnapshot = (dealId) => {
+    const deal = savedDeals.find(d=>d.id===dealId);
+    if(!deal) return null;
+    return {...deal.inputs, ...deal.metrics, address: deal.inputs?.address||"", _deal_name: deal.name};
+  };
+
+  const submit = async() => {
+    if(!form.title||!form.mode||!form.question) return;
     setSubmitting(true);
     try{
-      const post={user_id:user.id,author_name:profile?.full_name||"Anonymous",author_type:profile?.investor_type||"",author_verified:profile?.is_verified||false,author_portfolio:profile?.portfolio_value||0,title:form.title,mode:form.mode,address:form.address,question:form.question,metrics:form.metrics,upvotes:0,created_at:new Date().toISOString()};
-      const saved=await supabase.insertPost(post).catch(()=>null);
-      const np=Array.isArray(saved)?saved[0]:{...post,id:Date.now().toString()};
-      setPosts(p=>[np,...p]);setShowNew(false);setForm({title:"",mode:"",address:"",question:"",metrics:{}});
+      const snap = form.snapshot;
+      const post = {
+        user_id: user.id,
+        author_name: profile?.full_name||"Anonymous",
+        author_type: profile?.investor_type||"",
+        author_verified: profile?.is_verified||false,
+        author_portfolio: profile?.portfolio_value||0,
+        title: form.title,
+        mode: form.mode,
+        address: form.locationVisibility==="hidden"?"":form.locationVisibility==="city"&&form.address?form.address.split(",").slice(-2).join(",").trim():form.address,
+        question: form.question,
+        deal_snapshot: snap,
+        post_type: postType,
+        reactions: {solid:0,tight:0,pass:0},
+        upvotes: 0,
+        created_at: new Date().toISOString(),
+      };
+      const saved = await supabase.insertPost(post).catch(()=>null);
+      const np = Array.isArray(saved)?saved[0]:{...post,id:Date.now().toString()};
+      setPosts(p=>[np,...p]);
+      setShowNew(false);
+      setForm({title:"",mode:"",question:"",selectedPrompt:"",address:"",locationVisibility:"full",snapshot:null});
+      setPostType("deal");
     }finally{setSubmitting(false);}
   };
 
-  const openPost=async(post)=>{setActivePost(post);const c=await supabase.getComments(post.id).catch(()=>[]);setComments(c);};
+  const openPost = async(post) => {
+    setActivePost(post);
+    setBestAnswer(post.best_answer_id||null);
+    const c = await supabase.getComments(post.id).catch(()=>[]);
+    setComments(c);
+  };
 
-  const handleUpvote=async(post,e)=>{
+  const handleUpvote = async(post, e) => {
     e.stopPropagation();
-    await supabase.upvotePost(post.id,post.upvotes||0).catch(()=>{});
+    await supabase.upvotePost(post.id, post.upvotes||0).catch(()=>{});
     setPosts(prev=>prev.map(p=>p.id===post.id?{...p,upvotes:(p.upvotes||0)+1}:p));
   };
 
-  const submitComment=async()=>{
-    if(!newComment.trim()||!activePost)return;
+  const handleReact = async(post, type) => {
+    const key = `${post.id}_${user.id}`;
+    const prev = userReactions[key];
+    if(prev===type) return;
+    const newReactions = {...(post.reactions||{solid:0,tight:0,pass:0})};
+    if(prev) newReactions[prev]=Math.max(0,(newReactions[prev]||0)-1);
+    newReactions[type]=(newReactions[type]||0)+1;
+    setUserReactions(r=>({...r,[key]:type}));
+    setPosts(prev=>prev.map(p=>p.id===post.id?{...p,reactions:newReactions}:p));
+    if(activePost?.id===post.id) setActivePost(p=>({...p,reactions:newReactions}));
+    await supabase._fetch(`/rest/v1/forum_posts?id=eq.${post.id}`,{method:"PATCH",body:JSON.stringify({reactions:newReactions})}).catch(()=>{});
+  };
+
+  const submitComment = async() => {
+    if(!newComment.trim()||!activePost) return;
     setPostingComment(true);
     try{
-      const c={post_id:activePost.id,user_id:user.id,author_name:profile?.full_name||"Anonymous",author_verified:profile?.is_verified||false,body:newComment.trim(),created_at:new Date().toISOString()};
-      const saved=await supabase.insertComment(c).catch(()=>null);
-      const nc=Array.isArray(saved)?saved[0]:{...c,id:Date.now().toString()};
-      setComments(prev=>[...prev,nc]);setNewComment("");
+      const c = {post_id:activePost.id,user_id:user.id,author_name:profile?.full_name||"Anonymous",author_verified:profile?.is_verified||false,body:newComment.trim(),created_at:new Date().toISOString()};
+      const saved = await supabase.insertComment(c).catch(()=>null);
+      const nc = Array.isArray(saved)?saved[0]:{...c,id:Date.now().toString()};
+      setComments(prev=>[...prev,nc]);
+      setNewComment("");
     }finally{setPostingComment(false);}
   };
 
-  if(activePost){
-    const m=MODES.find(m=>m.key===activePost.mode||m.label===activePost.mode);
-    const medal=getMedal(+(activePost.author_portfolio||0));
+  const markBestAnswer = (commentId) => {
+    setBestAnswer(commentId);
+    supabase._fetch(`/rest/v1/forum_posts?id=eq.${activePost.id}`,{method:"PATCH",body:JSON.stringify({best_answer_id:commentId})}).catch(()=>{});
+  };
+
+  // ── POST DETAIL VIEW ──
+  if(activePost) {
+    const m = MODES.find(m=>m.key===activePost.mode);
+    const medal = getMedal(+(activePost.author_portfolio||0));
+    const userReactionKey = `${activePost.id}_${user.id}`;
     return (
       <div style={{maxWidth:800,margin:"0 auto",padding:"28px"}}>
-        <button onClick={()=>setActivePost(null)} style={{background:"none",border:"none",fontSize:13,color:"#6b7280",cursor:"pointer",marginBottom:20}}>← Back to Community</button>
+        <button onClick={()=>setActivePost(null)} style={{background:"none",border:"none",fontSize:13,color:"#6b7280",cursor:"pointer",marginBottom:20,display:"flex",alignItems:"center",gap:5}}>← Back to Community</button>
         <div style={{background:"white",borderRadius:18,border:"1.5px solid #e5e7eb",overflow:"hidden",marginBottom:24}}>
           <div style={{padding:"24px 28px",borderBottom:"1px solid #f3f4f6"}}>
-            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12,flexWrap:"wrap"}}>
               {m&&<span style={{fontSize:11,fontWeight:700,color:m.color,background:m.bg,padding:"3px 10px",borderRadius:100,border:`1px solid ${m.border}`}}>{m.icon} {m.label}</span>}
+              {activePost.post_type==="deal"&&<span style={{fontSize:11,background:"#f0fdf4",color:"#059669",padding:"2px 8px",borderRadius:100,border:"1px solid #bbf7d0",fontWeight:600}}>📊 Deal Post</span>}
               {activePost.address&&<span style={{fontSize:12,color:"#6b7280"}}>📍 {activePost.address}</span>}
             </div>
-            <h2 style={{fontFamily:"'Fraunces',serif",fontSize:22,fontWeight:800,color:"#111827",marginBottom:10}}>{activePost.title}</h2>
-            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:14}}>
-              <div style={{width:30,height:30,borderRadius:"50%",background:"linear-gradient(135deg,#10b981,#059669)",display:"flex",alignItems:"center",justifyContent:"center"}}>
-                <span style={{fontSize:12,fontWeight:800,color:"white"}}>{(activePost.author_name||"?")[0].toUpperCase()}</span>
+            <h2 style={{fontFamily:"'Fraunces',serif",fontSize:22,fontWeight:800,color:"#111827",marginBottom:12}}>{activePost.title}</h2>
+            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:16,flexWrap:"wrap"}}>
+              <div style={{width:32,height:32,borderRadius:"50%",background:"linear-gradient(135deg,#10b981,#059669)",display:"flex",alignItems:"center",justifyContent:"center"}}>
+                <span style={{fontSize:13,fontWeight:800,color:"white"}}>{(activePost.author_name||"?")[0].toUpperCase()}</span>
               </div>
-              <span style={{fontSize:13,fontWeight:600,color:"#111827"}}>{activePost.author_name}</span>
-              <span style={{fontSize:13}}>{medal.icon}</span>
+              <span style={{fontSize:14,fontWeight:600,color:"#111827"}}>{activePost.author_name}</span>
+              <span style={{fontSize:14}}>{medal.icon}</span>
               {activePost.author_verified&&<span style={{fontSize:10,background:"#f0fdf4",color:"#059669",border:"1px solid #bbf7d0",borderRadius:100,padding:"1px 6px",fontWeight:700}}>✓ Verified</span>}
-              {activePost.author_type&&<span style={{fontSize:11,color:"#9ca3af"}}>· {activePost.author_type}</span>}
+              {activePost.author_type&&<span style={{fontSize:12,color:"#9ca3af"}}>· {activePost.author_type}</span>}
+              <span style={{fontSize:12,color:"#9ca3af"}}>· {new Date(activePost.created_at).toLocaleDateString()}</span>
             </div>
+
+            {/* Deal Card */}
+            {activePost.deal_snapshot&&<DealCard snapshot={activePost.deal_snapshot} mode={activePost.mode} collapsed={false}/>}
+
             <p style={{fontSize:14,color:"#374151",lineHeight:1.75,marginBottom:20}}>{activePost.question}</p>
-            {activePost.metrics&&Object.keys(activePost.metrics).filter(k=>activePost.metrics[k]).length>0&&(
-              <div style={{background:"#f9fafb",borderRadius:12,padding:"14px 18px",display:"flex",gap:20,flexWrap:"wrap"}}>
-                {Object.entries(activePost.metrics).filter(([,v])=>v).map(([k,v])=>(
-                  <div key={k}><div style={{fontSize:9,color:"#9ca3af",fontWeight:700,textTransform:"uppercase",marginBottom:3}}>{k}</div><div style={{fontSize:15,fontWeight:800,fontFamily:"'DM Mono',monospace",color:"#111827"}}>{v}</div></div>
-                ))}
-              </div>
-            )}
+
+            {/* Reactions */}
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:10,paddingTop:16,borderTop:"1px solid #f3f4f6"}}>
+              <ReactionBar post={activePost} onReact={handleReact} userReaction={userReactions[userReactionKey]}/>
+              <button onClick={e=>handleUpvote(activePost,e)} style={{display:"flex",alignItems:"center",gap:6,padding:"6px 14px",borderRadius:100,border:"1.5px solid #e5e7eb",background:"white",cursor:"pointer",fontSize:12,fontWeight:600,color:"#374151"}}>
+                ▲ {activePost.upvotes||0} upvotes
+              </button>
+            </div>
           </div>
+
+          {/* Comments */}
           <div style={{padding:"20px 28px"}}>
             <h3 style={{fontSize:14,fontWeight:700,color:"#374151",marginBottom:16}}>{comments.length} Response{comments.length!==1?"s":""}</h3>
             {comments.map(c=>(
-              <div key={c.id} style={{marginBottom:16,paddingBottom:16,borderBottom:"1px solid #f3f4f6"}}>
-                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
-                  <div style={{width:28,height:28,borderRadius:"50%",background:"linear-gradient(135deg,#10b981,#059669)",display:"flex",alignItems:"center",justifyContent:"center"}}><span style={{fontSize:11,fontWeight:800,color:"white"}}>{(c.author_name||"?")[0].toUpperCase()}</span></div>
-                  <span style={{fontSize:13,fontWeight:600,color:"#111827"}}>{c.author_name}</span>
-                  {c.author_verified&&<span style={{fontSize:10,background:"#f0fdf4",color:"#059669",border:"1px solid #bbf7d0",borderRadius:100,padding:"1px 6px",fontWeight:700}}>✓</span>}
-                  <span style={{fontSize:11,color:"#9ca3af"}}>{new Date(c.created_at).toLocaleDateString()}</span>
+              <div key={c.id} style={{marginBottom:16,paddingBottom:16,borderBottom:"1px solid #f3f4f6",background:bestAnswer===c.id?"#f0fdf4":"transparent",borderRadius:bestAnswer===c.id?10:0,padding:bestAnswer===c.id?"12px 14px":"0 0 16px 0"}}>
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8,flexWrap:"wrap",gap:8}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8}}>
+                    <div style={{width:28,height:28,borderRadius:"50%",background:"linear-gradient(135deg,#10b981,#059669)",display:"flex",alignItems:"center",justifyContent:"center"}}>
+                      <span style={{fontSize:11,fontWeight:800,color:"white"}}>{(c.author_name||"?")[0].toUpperCase()}</span>
+                    </div>
+                    <span style={{fontSize:13,fontWeight:600,color:"#111827"}}>{c.author_name}</span>
+                    {c.author_verified&&<span style={{fontSize:10,background:"#f0fdf4",color:"#059669",border:"1px solid #bbf7d0",borderRadius:100,padding:"1px 6px",fontWeight:700}}>✓</span>}
+                    {bestAnswer===c.id&&<span style={{fontSize:10,background:"#f0fdf4",color:"#059669",borderRadius:100,padding:"2px 8px",fontWeight:700,border:"1px solid #bbf7d0"}}>⭐ Best Answer</span>}
+                    <span style={{fontSize:11,color:"#9ca3af"}}>{new Date(c.created_at).toLocaleDateString()}</span>
+                  </div>
+                  {activePost.user_id===user.id&&bestAnswer!==c.id&&(
+                    <button onClick={()=>markBestAnswer(c.id)} style={{padding:"3px 10px",borderRadius:100,border:"1px solid #e5e7eb",background:"white",color:"#6b7280",fontSize:11,cursor:"pointer"}}>Mark Best Answer</button>
+                  )}
                 </div>
                 <p style={{fontSize:14,color:"#374151",lineHeight:1.6,paddingLeft:36}}>{c.body}</p>
               </div>
@@ -531,41 +1399,106 @@ function ForumView({user,profile}) {
     );
   }
 
+  // ── FEED VIEW ──
   return (
     <div style={{maxWidth:960,margin:"0 auto",padding:"28px"}}>
-      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:24,flexWrap:"wrap",gap:14}}>
-        <div><h2 style={{fontFamily:"'Fraunces',serif",fontSize:26,fontWeight:800,color:"#111827",marginBottom:4}}>👥 Community Forum</h2><p style={{fontSize:13,color:"#9ca3af"}}>Share deals, ask questions, get feedback from fellow investors</p></div>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:22,flexWrap:"wrap",gap:14}}>
+        <div>
+          <h2 style={{fontFamily:"'Fraunces',serif",fontSize:26,fontWeight:800,color:"#111827",marginBottom:4}}>👥 Community Forum</h2>
+          <p style={{fontSize:13,color:"#9ca3af"}}>Deal-backed posts · Real numbers · Honest feedback</p>
+        </div>
         <Btn variant="primary" onClick={()=>setShowNew(true)}>+ Share a Deal</Btn>
       </div>
 
       {/* Filters */}
       <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:22}}>
         <button onClick={()=>handleFilter("all")} style={{padding:"6px 14px",borderRadius:100,border:`1.5px solid ${filterMode==="all"?"#111827":"#e5e7eb"}`,background:filterMode==="all"?"#111827":"white",color:filterMode==="all"?"white":"#6b7280",fontSize:12,fontWeight:600,cursor:"pointer"}}>All</button>
-        {MODES.map(m=><button key={m.key} onClick={()=>handleFilter(m.key)} style={{display:"flex",alignItems:"center",gap:5,padding:"6px 14px",borderRadius:100,border:`1.5px solid ${filterMode===m.key?m.border:"#e5e7eb"}`,background:filterMode===m.key?m.bg:"white",color:filterMode===m.key?m.color:"#6b7280",fontSize:12,fontWeight:600,cursor:"pointer"}}>{m.icon} {m.label}</button>)}
+        {MODES.map(m=>(
+          <button key={m.key} onClick={()=>handleFilter(m.key)} style={{display:"flex",alignItems:"center",gap:5,padding:"6px 14px",borderRadius:100,border:`1.5px solid ${filterMode===m.key?m.border:"#e5e7eb"}`,background:filterMode===m.key?m.bg:"white",color:filterMode===m.key?m.color:"#6b7280",fontSize:12,fontWeight:600,cursor:"pointer"}}>{m.icon} {m.label}</button>
+        ))}
       </div>
 
+      {/* New Post Form */}
       {showNew&&(
         <div style={{background:"white",borderRadius:18,border:"1.5px solid #e5e7eb",padding:"28px",marginBottom:24,animation:"fadeUp 0.3s ease both"}}>
-          <h3 style={{fontFamily:"'Fraunces',serif",fontSize:18,fontWeight:800,color:"#111827",marginBottom:20}}>Share a Deal for Feedback</h3>
+          <h3 style={{fontFamily:"'Fraunces',serif",fontSize:18,fontWeight:800,color:"#111827",marginBottom:18}}>Share with the Community</h3>
+
+          {/* Post type selector */}
+          <div style={{display:"flex",gap:10,marginBottom:20}}>
+            {[["deal","📊 Deal-Backed Post","Attach deal numbers — get better feedback"],["general","💬 General Question","Ask without deal numbers"]].map(([type,label,desc])=>(
+              <button key={type} onClick={()=>setPostType(type)} style={{flex:1,padding:"12px 14px",borderRadius:12,border:`2px solid ${postType===type?"#10b981":"#e5e7eb"}`,background:postType===type?"#f0fdf4":"white",cursor:"pointer",textAlign:"left",transition:"all 0.15s"}}>
+                <div style={{fontSize:13,fontWeight:700,color:postType===type?"#059669":"#374151",marginBottom:3}}>{label} {postType===type?"✓":""}</div>
+                <div style={{fontSize:11,color:"#9ca3af"}}>{desc}</div>
+              </button>
+            ))}
+          </div>
+
           <div style={{display:"flex",flexDirection:"column",gap:14}}>
-            <Input label="Deal title" value={form.title} onChange={v=>setForm(p=>({...p,title:v}))} placeholder="e.g. 3BR rental in Atlanta — good deal?"/>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
-              <Sel label="Strategy type" value={form.mode} onChange={v=>setForm(p=>({...p,mode:v}))} options={MODES.map(m=>m.key)} placeholder="Select strategy..."/>
-              <Input label="Property address (optional)" value={form.address} onChange={v=>setForm(p=>({...p,address:v}))} placeholder="123 Main St, City" icon="📍"/>
+            {/* Strategy + Title */}
+            <div style={{display:"grid",gridTemplateColumns:"1fr 2fr",gap:14}}>
+              <Sel label="Strategy *" value={form.mode} onChange={v=>setForm(p=>({...p,mode:v,selectedPrompt:""}))} options={MODES.map(m=>m.key)} placeholder="Select..."/>
+              <Input label="Title *" value={form.title} onChange={v=>setForm(p=>({...p,title:v}))} placeholder="e.g. 3BR rental in Atlanta — does this cash flow?"/>
             </div>
+
+            {/* Strategy-specific prompts */}
+            {form.mode&&FEEDBACK_PROMPTS[form.mode]&&(
+              <div>
+                <label style={{fontSize:12,fontWeight:600,color:"#374151",display:"block",marginBottom:8}}>What feedback do you need? (tap to select)</label>
+                <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                  {FEEDBACK_PROMPTS[form.mode].map(prompt=>(
+                    <button key={prompt} onClick={()=>setForm(p=>({...p,selectedPrompt:prompt,question:prompt+"\n\n"+(p.question||"")}))}
+                      style={{padding:"5px 12px",borderRadius:100,border:`1.5px solid ${form.selectedPrompt===prompt?"#10b981":"#e5e7eb"}`,background:form.selectedPrompt===prompt?"#f0fdf4":"white",color:form.selectedPrompt===prompt?"#059669":"#6b7280",fontSize:11,fontWeight:600,cursor:"pointer"}}>{prompt}</button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Question */}
             <div>
-              <label style={{fontSize:12,fontWeight:600,color:"#374151",display:"block",marginBottom:5}}>Your question / what feedback do you need?</label>
-              <textarea value={form.question} onChange={e=>setForm(p=>({...p,question:e.target.value}))} placeholder="Describe the deal and what specific advice you're looking for..." rows={4}
+              <label style={{fontSize:12,fontWeight:600,color:"#374151",display:"block",marginBottom:5}}>Your question / context *</label>
+              <textarea value={form.question} onChange={e=>setForm(p=>({...p,question:e.target.value}))} placeholder="Describe the deal and what you want feedback on..." rows={4}
                 style={{width:"100%",padding:"12px 14px",borderRadius:10,border:"1.5px solid #e5e7eb",fontSize:14,color:"#111827",outline:"none",resize:"vertical",fontFamily:"'DM Sans',sans-serif"}}/>
             </div>
-            <div>
-              <label style={{fontSize:12,fontWeight:600,color:"#374151",display:"block",marginBottom:10}}>Key numbers (optional)</label>
-              <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10}}>
-                {["Purchase Price","Monthly Rent","ARV","Cash Flow","ROI","Down Payment"].map(k=>(
-                  <div key={k}><label style={{fontSize:11,color:"#6b7280",display:"block",marginBottom:4}}>{k}</label><input type="text" placeholder="e.g. $320,000" onChange={e=>setForm(p=>({...p,metrics:{...p.metrics,[k]:e.target.value}}))} style={{width:"100%",padding:"8px 10px",borderRadius:8,border:"1.5px solid #e5e7eb",fontSize:12,outline:"none",fontFamily:"'DM Mono',monospace"}}/></div>
-                ))}
+
+            {/* Address + privacy */}
+            <div style={{display:"grid",gridTemplateColumns:"2fr 1fr",gap:14}}>
+              <Input label="Property address" value={form.address} onChange={v=>setForm(p=>({...p,address:v}))} placeholder="123 Main St, Atlanta, GA" icon="📍"/>
+              <div>
+                <label style={{fontSize:12,fontWeight:600,color:"#374151",display:"block",marginBottom:5}}>Location privacy</label>
+                <select value={form.locationVisibility} onChange={e=>setForm(p=>({...p,locationVisibility:e.target.value}))} style={{width:"100%",padding:"10px 12px",borderRadius:8,border:"1.5px solid #e5e7eb",fontSize:13,outline:"none",color:"#374151"}}>
+                  <option value="full">Show full address</option>
+                  <option value="city">City/State only</option>
+                  <option value="hidden">Hide location</option>
+                </select>
               </div>
             </div>
+
+            {/* Deal snapshot (manual key numbers for now) */}
+            {postType==="deal"&&form.mode&&(
+              <div style={{background:"#f9fafb",borderRadius:12,padding:"16px 18px",border:"1.5px solid #e5e7eb"}}>
+                <div style={{fontSize:12,fontWeight:700,color:"#374151",marginBottom:12}}>📊 Key Deal Numbers <span style={{fontSize:11,color:"#9ca3af",fontWeight:400}}>(readers see this as a deal card)</span></div>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10}}>
+                  {(()=>{
+                    const fields={
+                      rental:[["pp","Purchase Price"],["rent","Monthly Rent"],["mcf_display","Cash Flow/mo"],["coc_display","CoC ROI"]],
+                      wholesale:[["arv","ARV"],["repairs","Repairs"],["mao_display","MAO"],["fee","Your Fee"]],
+                      flip:[["pp","Purchase"],["rehab","Rehab"],["arv","ARV"],["profit_display","Net Profit"]],
+                      brrrr:[["pp","Purchase"],["rehab","Rehab"],["arv","ARV"],["cash_left_display","Cash Left"]],
+                      subto:[["balance","Loan Balance"],["rate","Rate %"],["mcf_display","CF/mo"],["ti_display","Cash In"]],
+                      novation:[["pp","Purchase"],["repairs","Repairs"],["arv","ARV"],["profit_display","Net Profit"]],
+                    };
+                    return (fields[form.mode]||[]).map(([key,label])=>(
+                      <div key={key}>
+                        <label style={{fontSize:11,color:"#6b7280",display:"block",marginBottom:3}}>{label}</label>
+                        <input type="text" placeholder="e.g. $320,000" onChange={e=>setForm(p=>({...p,snapshot:{...p.snapshot,[key]:e.target.value,address:p.address}}))}
+                          style={{width:"100%",padding:"7px 10px",borderRadius:8,border:"1.5px solid #e5e7eb",fontSize:12,outline:"none",fontFamily:"'DM Mono',monospace",color:"#374151"}}/>
+                      </div>
+                    ));
+                  })()}
+                </div>
+              </div>
+            )}
+
             <div style={{display:"flex",gap:10}}>
               <Btn variant="ghost" onClick={()=>setShowNew(false)}>Cancel</Btn>
               <Btn variant="primary" loading={submitting} disabled={!form.title||!form.mode||!form.question} onClick={submit}>Post to Community →</Btn>
@@ -574,34 +1507,70 @@ function ForumView({user,profile}) {
         </div>
       )}
 
+      {/* Feed */}
       {loading?<div style={{textAlign:"center",padding:"60px",color:"#9ca3af"}}>Loading...</div>
       :posts.length===0?<div style={{textAlign:"center",padding:"80px 24px"}}><div style={{fontSize:52,marginBottom:16}}>👋</div><h3 style={{fontFamily:"'Fraunces',serif",fontSize:22,fontWeight:800,color:"#111827",marginBottom:8}}>Be the first to share!</h3><p style={{fontSize:14,color:"#6b7280"}}>Post a deal and get feedback from the community.</p></div>
       :(
         <div style={{display:"flex",flexDirection:"column",gap:12}}>
           {posts.map(post=>{
-            const m=MODES.find(m=>m.key===post.mode||m.label===post.mode);
-            const medal=getMedal(+(post.author_portfolio||0));
+            const m = MODES.find(m=>m.key===post.mode);
+            const medal = getMedal(+(post.author_portfolio||0));
+            const userReactionKey = `${post.id}_${user.id}`;
+            const reactions = post.reactions||{};
+            const totalReactions = (reactions.solid||0)+(reactions.tight||0)+(reactions.pass||0);
             return (
-              <div key={post.id} onClick={()=>openPost(post)} style={{background:"white",borderRadius:14,border:"1.5px solid #e5e7eb",padding:"18px 22px",cursor:"pointer",transition:"all 0.15s"}}
+              <div key={post.id} onClick={()=>openPost(post)} style={{background:"white",borderRadius:14,border:"1.5px solid #e5e7eb",overflow:"hidden",cursor:"pointer",transition:"all 0.15s"}}
                 onMouseEnter={e=>{e.currentTarget.style.borderColor="#10b981";e.currentTarget.style.boxShadow="0 4px 20px rgba(0,0,0,0.06)";}}
                 onMouseLeave={e=>{e.currentTarget.style.borderColor="#e5e7eb";e.currentTarget.style.boxShadow="none";}}>
-                <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:16}}>
-                  <div style={{flex:1}}>
-                    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8,flexWrap:"wrap"}}>
-                      {m&&<span style={{fontSize:11,fontWeight:700,color:m.color,background:m.bg,padding:"2px 8px",borderRadius:100,border:`1px solid ${m.border}`}}>{m.icon} {m.label}</span>}
-                      {post.address&&<span style={{fontSize:11,color:"#9ca3af"}}>📍 {post.address}</span>}
+                {m&&<div style={{height:3,background:m.color,opacity:0.6}}/>}
+                <div style={{padding:"16px 20px"}}>
+                  <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:14}}>
+                    <div style={{flex:1,minWidth:0}}>
+                      {/* Tags */}
+                      <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:8,flexWrap:"wrap"}}>
+                        {m&&<span style={{fontSize:11,fontWeight:700,color:m.color,background:m.bg,padding:"2px 8px",borderRadius:100,border:`1px solid ${m.border}`}}>{m.icon} {m.label}</span>}
+                        {post.post_type==="deal"&&<span style={{fontSize:10,background:"#f0fdf4",color:"#059669",padding:"1px 7px",borderRadius:100,border:"1px solid #bbf7d0",fontWeight:600}}>📊 Deal</span>}
+                        {post.address&&<span style={{fontSize:11,color:"#9ca3af"}}>📍 {post.address}</span>}
+                      </div>
+                      <h3 style={{fontSize:15,fontWeight:700,color:"#111827",marginBottom:5}}>{post.title}</h3>
+
+                      {/* Mini deal card in feed */}
+                      {post.deal_snapshot&&(()=>{
+                        const snap=post.deal_snapshot;
+                        const key1=Object.entries(snap).find(([k,v])=>v&&!["address","_deal_name"].includes(k));
+                        const key2=Object.entries(snap).filter(([k,v])=>v&&!["address","_deal_name"].includes(k))[1];
+                        const key3=Object.entries(snap).filter(([k,v])=>v&&!["address","_deal_name"].includes(k))[2];
+                        return key1&&<div style={{display:"flex",gap:8,marginBottom:8,flexWrap:"wrap"}}>
+                          {[key1,key2,key3].filter(Boolean).map(([k,v])=>(
+                            <span key={k} style={{fontSize:11,fontFamily:"'DM Mono',monospace",color:"#374151",background:"#f9fafb",padding:"2px 8px",borderRadius:6,border:"1px solid #e5e7eb",fontWeight:600}}>{k.replace(/_display|_/g," ")}: {v}</span>
+                          ))}
+                        </div>;
+                      })()}
+
+                      <p style={{fontSize:13,color:"#6b7280",lineHeight:1.6,marginBottom:8}}>{post.question?.slice(0,100)}{post.question?.length>100?"...":""}</p>
+
+                      {/* Reaction summary in feed */}
+                      {totalReactions>0&&(
+                        <div style={{display:"flex",gap:6,marginBottom:8,flexWrap:"wrap"}}>
+                          {reactions.solid>0&&<span style={{fontSize:11,color:"#059669",background:"#f0fdf4",padding:"2px 8px",borderRadius:100,border:"1px solid #bbf7d0",fontWeight:600}}>✅ Solid ×{reactions.solid}</span>}
+                          {reactions.tight>0&&<span style={{fontSize:11,color:"#d97706",background:"#fffbeb",padding:"2px 8px",borderRadius:100,border:"1px solid #fde68a",fontWeight:600}}>⚠️ Tight ×{reactions.tight}</span>}
+                          {reactions.pass>0&&<span style={{fontSize:11,color:"#dc2626",background:"#fef2f2",padding:"2px 8px",borderRadius:100,border:"1px solid #fecaca",fontWeight:600}}>❌ Pass ×{reactions.pass}</span>}
+                        </div>
+                      )}
+
+                      <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                        <div style={{width:22,height:22,borderRadius:"50%",background:"linear-gradient(135deg,#10b981,#059669)",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                          <span style={{fontSize:9,fontWeight:800,color:"white"}}>{(post.author_name||"?")[0].toUpperCase()}</span>
+                        </div>
+                        <span style={{fontSize:12,fontWeight:600,color:"#374151"}}>{post.author_name}</span>
+                        <span style={{fontSize:12}}>{medal.icon}</span>
+                        {post.author_verified&&<span style={{fontSize:10,background:"#f0fdf4",color:"#059669",border:"1px solid #bbf7d0",borderRadius:100,padding:"1px 5px",fontWeight:700}}>✓</span>}
+                        <span style={{fontSize:11,color:"#9ca3af"}}>· {new Date(post.created_at).toLocaleDateString()}</span>
+                      </div>
                     </div>
-                    <h3 style={{fontSize:16,fontWeight:700,color:"#111827",marginBottom:5}}>{post.title}</h3>
-                    <p style={{fontSize:13,color:"#6b7280",lineHeight:1.6,marginBottom:8}}>{post.question?.slice(0,120)}{post.question?.length>120?"...":""}</p>
-                    <div style={{display:"flex",alignItems:"center",gap:8}}>
-                      <span style={{fontSize:11,color:"#9ca3af"}}>By {post.author_name}</span>
-                      <span style={{fontSize:12}}>{medal.icon}</span>
-                      {post.author_verified&&<span style={{fontSize:10,background:"#f0fdf4",color:"#059669",border:"1px solid #bbf7d0",borderRadius:100,padding:"1px 6px",fontWeight:700}}>✓ Verified</span>}
-                      <span style={{fontSize:11,color:"#9ca3af"}}>· {new Date(post.created_at).toLocaleDateString()}</span>
-                    </div>
-                  </div>
-                  <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:6}}>
-                    <button onClick={e=>handleUpvote(post,e)} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:3,padding:"8px 12px",borderRadius:10,border:"1.5px solid #e5e7eb",background:"white",cursor:"pointer",transition:"all 0.15s"}}
+
+                    {/* Upvote */}
+                    <button onClick={e=>handleUpvote(post,e)} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:3,padding:"8px 12px",borderRadius:10,border:"1.5px solid #e5e7eb",background:"white",cursor:"pointer",flexShrink:0,transition:"all 0.15s"}}
                       onMouseEnter={e=>{e.currentTarget.style.background="#f0fdf4";e.currentTarget.style.borderColor="#bbf7d0";}}
                       onMouseLeave={e=>{e.currentTarget.style.background="white";e.currentTarget.style.borderColor="#e5e7eb";}}>
                       <span style={{fontSize:14}}>▲</span>
@@ -617,6 +1586,7 @@ function ForumView({user,profile}) {
     </div>
   );
 }
+
 
 // ─── Leaderboard ───────────────────────────────────────────────────────────────
 function LeaderboardView({user,profile,onGoProfile}) {
@@ -763,246 +1733,493 @@ function VerificationModal({user,profile,onClose,onSubmitted}) {
 }
 
 // ─── Portfolio Analyzer ────────────────────────────────────────────────────────
-function PortfolioAnalyzer({profile,onSave}) {
-  const [properties,setProperties]=useState(profile?.portfolio_properties||[]);
-  const [showAdd,setShowAdd]=useState(false);
-  const [newProp,setNewProp]=useState({address:"",type:"Single Family",value:"",equity:"",monthly_rent:"",monthly_expenses:"",monthly_mortgage:"",notes:""});
-  const [projYears,setProjYears]=useState(5);
-  const [projGrowth,setProjGrowth]=useState(4);
-  const [projAcqValue,setProjAcqValue]=useState(250000);
-  const [projAcqEquity,setProjAcqEquity]=useState(50000);
-  const [projAcqCF,setProjAcqCF]=useState(400);
-  const [projAcqCount,setProjAcqCount]=useState(1);
-  const np=k=>v=>setNewProp(p=>({...p,[k]:v}));
+// ─── PROPERTY SCORING ENGINE ───────────────────────────────────────────────────
+function scoreProperty(p) {
+  const val=parseFloat(p.value)||0;
+  const loan=parseFloat(p.loan_balance)||0;
+  const rent=parseFloat(p.monthly_rent)||0;
+  const exp=parseFloat(p.monthly_expenses)||0;
+  const mtg=parseFloat(p.monthly_mortgage)||0;
+  const rate=parseFloat(p.mortgage_rate)||7;
+  const term=parseFloat(p.mortgage_term)||30;
 
-  const addProp=()=>{
-    if(!newProp.address)return;
-    setProperties(prev=>[...prev,{...newProp,id:Date.now().toString()}]);
-    setNewProp({address:"",type:"Single Family",value:"",equity:"",monthly_rent:"",monthly_expenses:"",monthly_mortgage:"",notes:""});
-    setShowAdd(false);
-  };
-  const removeProp=id=>setProperties(p=>p.filter(x=>x.id!==id));
+  const mcf=rent-exp-mtg;
+  const acf=mcf*12;
+  const equity=val-loan;
+  const ltv=val>0?loan/val:0;
+  const noi=(rent-exp)*12;
+  const dscr=mtg>0?(rent-exp)/mtg:noi>0?99:0;
+  const coc=(val*0.2)>0?acf/(val*0.2):0; // rough CoC if no capital data
+  const expRatio=rent>0?(exp+mtg)/rent:0;
+  const breakEven=rent>0?(exp+mtg)/rent:0;
 
-  // Portfolio totals
-  const totals=useMemo(()=>{
-    const tv=properties.reduce((s,p)=>s+(parseFloat(p.value)||0),0);
-    const te=properties.reduce((s,p)=>s+(parseFloat(p.equity)||0),0);
-    const tmcf=properties.reduce((s,p)=>s+(parseFloat(p.monthly_rent)||0)-(parseFloat(p.monthly_expenses)||0)-(parseFloat(p.monthly_mortgage)||0),0);
-    const tacf=tmcf*12;
-    const roi=te>0?tacf/te:0;
-    const ltvRatio=tv>0?(tv-te)/tv:0;
-    return{tv,te,tmcf,tacf,roi,ltvRatio,count:properties.length};
-  },[properties]);
+  // Weighted score 0-100
+  const cfScore=Math.min(Math.max((mcf/500)*25,0),25);
+  const cocScore=Math.min(Math.max((coc/0.12)*20,0),20);
+  const dscrScore=Math.min(Math.max(((dscr-1)/0.5)*20,0),20);
+  const ltvScore=Math.min(Math.max(((1-ltv)/0.4)*20,0),20);
+  const eqScore=Math.min(Math.max((equity/val/0.3)*15,0),15);
+  const score=Math.round(cfScore+cocScore+dscrScore+ltvScore+eqScore);
 
-  // Future projections
-  const projections=useMemo(()=>{
-    const years=Array.from({length:projYears+1},(_,i)=>i);
-    const g=projGrowth/100;
-    return years.map(yr=>{
-      const existingValue=totals.tv*Math.pow(1+g,yr);
-      const existingEquity=totals.te+((totals.tv*Math.pow(1+g,yr))-totals.tv);
-      const newUnitsValue=projAcqCount*projAcqValue*(yr>0?Math.pow(1+g,yr):0);
-      const newUnitsEquity=yr>0?projAcqCount*projAcqEquity*yr:0;
-      const newUnitsCF=yr>0?projAcqCount*projAcqCF:0;
-      return{
-        year:yr,
-        totalValue:Math.round(existingValue+newUnitsValue),
-        totalEquity:Math.round(existingEquity+newUnitsEquity),
-        monthlyCF:Math.round(totals.tmcf+newUnitsCF),
-        properties:totals.count+(yr>0?projAcqCount*yr:0),
-      };
-    });
-  },[totals,projYears,projGrowth,projAcqValue,projAcqEquity,projAcqCF,projAcqCount]);
+  let grade,gradeColor,gradeBg,gradeIcon,gradePurpose;
+  if(score>=75){grade="Cash Cow";gradeColor="#059669";gradeBg="#f0fdf4";gradeIcon="🟢";gradePurpose="Hold long-term";}
+  else if(score>=58){grade="Equity Builder";gradeColor="#2563eb";gradeBg="#eff6ff";gradeIcon="🔵";gradePurpose="Refi candidate / appreciation play";}
+  else if(score>=42){grade="Balanced Asset";gradeColor="#d97706";gradeBg="#fffbeb";gradeIcon="🟡";gradePurpose="Steady portfolio filler";}
+  else if(score>=25){grade="Underperformer";gradeColor="#ea580c";gradeBg="#fff7ed";gradeIcon="🟠";gradePurpose="Optimize or refinance";}
+  else{grade="Risk Asset";gradeColor="#dc2626";gradeBg="#fef2f2";gradeIcon="🔴";gradePurpose="Consider restructuring or exit";}
 
-  const maxVal=Math.max(...projections.map(p=>p.totalValue),1);
-  const maxEq=Math.max(...projections.map(p=>p.totalEquity),1);
+  // Risk flags
+  const flags=[];
+  if(dscr<1.2&&dscr>0)flags.push("DSCR < 1.2");
+  if(ltv>0.8)flags.push("LTV > 80%");
+  if(mcf<0)flags.push("Negative CF");
+  if(expRatio>0.5)flags.push("Expenses > 50% of rent");
 
-  const handleSave=()=>{
-    const tv=totals.tv;
-    onSave({portfolio_properties:properties,portfolio_value:tv});
-  };
+  return{mcf,acf,equity,ltv,dscr,coc,noi,expRatio,breakEven,score,grade,gradeColor,gradeBg,gradeIcon,gradePurpose,flags};
+}
+
+// ─── REFI SIMULATOR ────────────────────────────────────────────────────────────
+function RefiSimulator({prop,onClose}) {
+  const [ltvPct,setLtvPct]=useState(75);
+  const [newRate,setNewRate]=useState(7.0);
+  const [newTerm,setNewTerm]=useState(30);
+  const [closingCosts,setClosingCosts]=useState(4000);
+
+  const val=parseFloat(prop.value)||0;
+  const currentLoan=parseFloat(prop.loan_balance)||0;
+  const rent=parseFloat(prop.monthly_rent)||0;
+  const exp=parseFloat(prop.monthly_expenses)||0;
+
+  const sim=useMemo(()=>{
+    const newLoan=val*ltvPct/100;
+    const cashOut=newLoan-currentLoan-closingCosts;
+    const r=newRate/100/12, n=newTerm*12;
+    const newPmt=r===0?newLoan/n:newLoan*(r*Math.pow(1+r,n))/(Math.pow(1+r,n)-1);
+    const newMcf=rent-exp-newPmt;
+    const newDscr=newPmt>0?(rent-exp)/newPmt:0;
+    const newLtv=val>0?newLoan/val:0;
+    const cashLeft=Math.max(0,currentLoan+closingCosts-newLoan);
+    const infinite=cashLeft<=0&&cashOut>0;
+    return{newLoan,cashOut,newPmt,newMcf,newDscr,newLtv,cashLeft,infinite};
+  },[val,currentLoan,ltvPct,newRate,newTerm,closingCosts,rent,exp]);
+
+  const dscrColor=sim.newDscr>=1.35?"#059669":sim.newDscr>=1.2?"#d97706":"#dc2626";
 
   return (
-    <div style={{display:"flex",flexDirection:"column",gap:24}}>
-      {/* Summary cards */}
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:14}}>
-        {[
-          ["🏠","Properties",totals.count,""],
-          ["💰","Total Value",fmtM(totals.tv),""],
-          ["📈","Total Equity",fmtM(totals.te),""],
-          ["💵","Mo. Cash Flow",fmtD(totals.tmcf),totals.tmcf>=0?"pos":"neg"],
-          ["📊","Annual Cash Flow",fmtD(totals.tacf),totals.tacf>=0?"pos":"neg"],
-          ["🎯","Cash-on-Cash ROI",fmtP(totals.roi),totals.roi>=0.08?"pos":""],
-        ].map(([icon,label,val,flag])=>(
-          <div key={label} style={{background:flag==="pos"?"#f0fdf4":flag==="neg"?"#fef2f2":"white",border:`1.5px solid ${flag==="pos"?"#bbf7d0":flag==="neg"?"#fecaca":"#e5e7eb"}`,borderRadius:14,padding:"18px 16px",textAlign:"center"}}>
-            <div style={{fontSize:22,marginBottom:8}}>{icon}</div>
-            <div style={{fontSize:10,fontWeight:700,color:"#9ca3af",textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:6}}>{label}</div>
-            <div style={{fontSize:20,fontWeight:800,fontFamily:"'DM Mono',monospace",color:flag==="pos"?"#059669":flag==="neg"?"#dc2626":"#111827"}}>{val}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* LTV bar */}
-      {totals.tv>0&&(
-        <div style={{background:"white",borderRadius:14,border:"1.5px solid #e5e7eb",padding:"20px 22px"}}>
-          <div style={{display:"flex",justifyContent:"space-between",marginBottom:10}}>
-            <span style={{fontSize:13,fontWeight:600,color:"#374151"}}>Portfolio LTV</span>
-            <span style={{fontSize:13,fontFamily:"'DM Mono',monospace",fontWeight:700,color:"#374151"}}>{fmtP(totals.ltvRatio)} debt · {fmtP(1-totals.ltvRatio)} equity</span>
-          </div>
-          <div style={{height:12,background:"#f3f4f6",borderRadius:6,overflow:"hidden",display:"flex"}}>
-            <div style={{width:`${(1-totals.ltvRatio)*100}%`,background:"linear-gradient(90deg,#10b981,#059669)",borderRadius:"6px 0 0 6px",transition:"width 0.5s"}}/>
-            <div style={{flex:1,background:"#fde68a"}}/>
-          </div>
-          <div style={{display:"flex",justifyContent:"space-between",marginTop:6}}>
-            <span style={{fontSize:11,color:"#059669",fontWeight:600}}>Equity {fmtM(totals.te)}</span>
-            <span style={{fontSize:11,color:"#d97706",fontWeight:600}}>Debt {fmtM(totals.tv-totals.te)}</span>
-          </div>
-        </div>
-      )}
-
-      {/* Properties list */}
-      <div style={{background:"white",borderRadius:14,border:"1.5px solid #e5e7eb",overflow:"hidden"}}>
-        <div style={{padding:"18px 22px",borderBottom:"1px solid #f3f4f6",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-          <h3 style={{fontSize:15,fontWeight:700,color:"#111827"}}>My Properties</h3>
-          <button onClick={()=>setShowAdd(v=>!v)} style={{display:"flex",alignItems:"center",gap:6,padding:"7px 14px",borderRadius:8,border:"1.5px solid #bbf7d0",background:"#f0fdf4",color:"#059669",fontSize:12,fontWeight:700,cursor:"pointer"}}>+ Add Property</button>
-        </div>
-        {showAdd&&(
-          <div style={{padding:"18px 22px",background:"#fafafa",borderBottom:"1px solid #f3f4f6"}}>
-            <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr",gap:10,marginBottom:10}}>
-              <input value={newProp.address} onChange={e=>np("address")(e.target.value)} placeholder="Property address *" style={{padding:"9px 12px",borderRadius:8,border:"1.5px solid #e5e7eb",fontSize:13,outline:"none",fontFamily:"'DM Sans',sans-serif"}}/>
-              <select value={newProp.type} onChange={e=>np("type")(e.target.value)} style={{padding:"9px 12px",borderRadius:8,border:"1.5px solid #e5e7eb",fontSize:13,outline:"none"}}>
-                {["Single Family","Multi-Family","Commercial","STR","Vacant Land"].map(t=><option key={t}>{t}</option>)}
-              </select>
-              <input type="number" value={newProp.value} onChange={e=>np("value")(e.target.value)} placeholder="Value $" style={{padding:"9px 12px",borderRadius:8,border:"1.5px solid #e5e7eb",fontSize:13,outline:"none",fontFamily:"'DM Mono',monospace"}}/>
-              <input type="number" value={newProp.equity} onChange={e=>np("equity")(e.target.value)} placeholder="Equity $" style={{padding:"9px 12px",borderRadius:8,border:"1.5px solid #e5e7eb",fontSize:13,outline:"none",fontFamily:"'DM Mono',monospace"}}/>
-            </div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 2fr",gap:10,marginBottom:12}}>
-              <input type="number" value={newProp.monthly_rent} onChange={e=>np("monthly_rent")(e.target.value)} placeholder="Mo. Rent $" style={{padding:"9px 12px",borderRadius:8,border:"1.5px solid #e5e7eb",fontSize:13,outline:"none",fontFamily:"'DM Mono',monospace"}}/>
-              <input type="number" value={newProp.monthly_expenses} onChange={e=>np("monthly_expenses")(e.target.value)} placeholder="Expenses $" style={{padding:"9px 12px",borderRadius:8,border:"1.5px solid #e5e7eb",fontSize:13,outline:"none",fontFamily:"'DM Mono',monospace"}}/>
-              <input type="number" value={newProp.monthly_mortgage} onChange={e=>np("monthly_mortgage")(e.target.value)} placeholder="Mortgage $" style={{padding:"9px 12px",borderRadius:8,border:"1.5px solid #e5e7eb",fontSize:13,outline:"none",fontFamily:"'DM Mono',monospace"}}/>
-              <input value={newProp.notes} onChange={e=>np("notes")(e.target.value)} placeholder="Notes (optional)" style={{padding:"9px 12px",borderRadius:8,border:"1.5px solid #e5e7eb",fontSize:13,outline:"none",fontFamily:"'DM Sans',sans-serif"}}/>
-            </div>
-            <div style={{display:"flex",gap:8}}>
-              <Btn variant="ghost" small onClick={()=>setShowAdd(false)}>Cancel</Btn>
-              <Btn variant="primary" small disabled={!newProp.address} onClick={addProp}>Add Property</Btn>
-            </div>
-          </div>
-        )}
-        {properties.length===0?(
-          <div style={{padding:"40px 22px",textAlign:"center",color:"#9ca3af"}}>
-            <div style={{fontSize:36,marginBottom:10}}>🏠</div>
-            <p style={{fontSize:14}}>No properties added yet. Click "+ Add Property" to start.</p>
-          </div>
-        ):(
+    <div onClick={e=>e.target===e.currentTarget&&onClose()} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",backdropFilter:"blur(4px)",zIndex:600,display:"flex",alignItems:"center",justifyContent:"center",padding:24}}>
+      <div style={{background:"white",borderRadius:20,padding:32,maxWidth:520,width:"100%",boxShadow:"0 24px 60px rgba(0,0,0,0.15)",animation:"popIn 0.2s cubic-bezier(0.34,1.56,0.64,1) both"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:20}}>
           <div>
-            {properties.map((prop,idx)=>{
-              const mcf=(parseFloat(prop.monthly_rent)||0)-(parseFloat(prop.monthly_expenses)||0)-(parseFloat(prop.monthly_mortgage)||0);
-              return (
-                <div key={prop.id} style={{padding:"16px 22px",borderBottom:idx<properties.length-1?"1px solid #f3f4f6":"none",display:"flex",alignItems:"center",gap:16}}>
-                  <div style={{flex:1,minWidth:0}}>
-                    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:3,flexWrap:"wrap"}}>
-                      <span style={{fontSize:14,fontWeight:700,color:"#111827"}}>{prop.address}</span>
-                      <span style={{fontSize:11,background:"#f3f4f6",color:"#6b7280",padding:"1px 8px",borderRadius:100}}>{prop.type}</span>
-                    </div>
-                    {prop.notes&&<p style={{fontSize:12,color:"#9ca3af"}}>{prop.notes}</p>}
-                  </div>
-                  <div style={{display:"flex",gap:16,flexShrink:0}}>
-                    {[["Value",fmtM(parseFloat(prop.value)||0)],["Equity",fmtM(parseFloat(prop.equity)||0)],["Mo. CF",fmtD(mcf)]].map(([l,v])=>(
-                      <div key={l} style={{textAlign:"center"}}>
-                        <div style={{fontSize:13,fontWeight:800,fontFamily:"'DM Mono',monospace",color:l==="Mo. CF"&&mcf<0?"#dc2626":l==="Mo. CF"&&mcf>=0?"#059669":"#111827"}}>{v}</div>
-                        <div style={{fontSize:9,color:"#9ca3af",textTransform:"uppercase"}}>{l}</div>
-                      </div>
-                    ))}
-                  </div>
-                  <button onClick={()=>removeProp(prop.id)} style={{padding:"6px 10px",borderRadius:7,border:"1.5px solid #fee2e2",background:"#fff5f5",color:"#dc2626",fontSize:12,cursor:"pointer",flexShrink:0}}>✕</button>
-                </div>
-              );
-            })}
+            <h3 style={{fontFamily:"'Fraunces',serif",fontSize:20,fontWeight:800,color:"#111827",marginBottom:3}}>Refi Simulator</h3>
+            <p style={{fontSize:12,color:"#9ca3af"}}>{prop.address}</p>
           </div>
-        )}
-      </div>
-
-      {/* Future Acquisition Planner */}
-      <div style={{background:"white",borderRadius:14,border:"1.5px solid #e5e7eb",overflow:"hidden"}}>
-        <div style={{padding:"18px 22px",borderBottom:"1px solid #f3f4f6",background:"linear-gradient(135deg,#f0fdf4,#ecfdf5)"}}>
-          <h3 style={{fontSize:15,fontWeight:700,color:"#111827",marginBottom:3}}>🔮 Future Acquisition Planner</h3>
-          <p style={{fontSize:12,color:"#6b7280"}}>Project your portfolio value by adding future acquisitions</p>
+          <button onClick={onClose} style={{background:"none",border:"none",fontSize:18,cursor:"pointer",color:"#9ca3af"}}>✕</button>
         </div>
-        <div style={{padding:"22px"}}>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:14,marginBottom:24}}>
-            {[
-              ["Projection Years",projYears,v=>setProjYears(+v),"yr",1,30],
-              ["Annual Growth %",projGrowth,v=>setProjGrowth(+v),"%",0,20],
-              ["Acquisitions/yr",projAcqCount,v=>setProjAcqCount(+v),"props",1,20],
-              ["Avg Value/Property",projAcqValue,v=>setProjAcqValue(+v),"$",50000,2000000],
-              ["Avg Equity/Property",projAcqEquity,v=>setProjAcqEquity(+v),"$",10000,500000],
-              ["Avg Mo. CF/Property",projAcqCF,v=>setProjAcqCF(+v),"$",0,5000],
-            ].map(([lbl,val,setter,unit,min,max])=>(
-              <div key={lbl} style={{display:"flex",flexDirection:"column",gap:6}}>
-                <label style={{fontSize:11,fontWeight:600,color:"#6b7280",textTransform:"uppercase",letterSpacing:"0.05em"}}>{lbl}</label>
-                <input type="number" value={val} min={min} max={max} onChange={e=>setter(e.target.value)}
-                  style={{padding:"9px 12px",borderRadius:8,border:"1.5px solid #e5e7eb",fontSize:13,fontFamily:"'DM Mono',monospace",outline:"none",color:"#111827"}}/>
-                <span style={{fontSize:10,color:"#9ca3af"}}>{unit}</span>
-              </div>
-            ))}
-          </div>
-
-          {/* Projection chart (CSS bar chart) */}
-          <div style={{marginBottom:20}}>
-            <div style={{display:"flex",justifyContent:"space-between",marginBottom:12}}>
-              <span style={{fontSize:12,fontWeight:700,color:"#374151"}}>Portfolio Value Projection</span>
-              <div style={{display:"flex",gap:14}}>
-                <div style={{display:"flex",alignItems:"center",gap:5}}><div style={{width:10,height:10,borderRadius:2,background:"#10b981"}}/><span style={{fontSize:11,color:"#6b7280"}}>Value</span></div>
-                <div style={{display:"flex",alignItems:"center",gap:5}}><div style={{width:10,height:10,borderRadius:2,background:"#7c3aed"}}/><span style={{fontSize:11,color:"#6b7280"}}>Equity</span></div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:20}}>
+          {[["New LTV %",ltvPct,setLtvPct,"%"],["New Rate %",newRate,setNewRate,"%"],["New Term",newTerm,setNewTerm,"yr"],["Closing Costs",closingCosts,setClosingCosts,"$"]].map(([label,val,setter,unit])=>(
+            <div key={label} style={{display:"flex",flexDirection:"column",gap:4}}>
+              <label style={{fontSize:11,fontWeight:600,color:"#6b7280",textTransform:"uppercase"}}>{label}</label>
+              <div style={{display:"flex",alignItems:"center",background:"#f9fafb",border:"1.5px solid #e5e7eb",borderRadius:8,overflow:"hidden"}}>
+                {unit==="$"&&<span style={{padding:"0 8px",color:"#9ca3af",fontSize:12,background:"#f3f4f6",borderRight:"1px solid #e5e7eb"}}>$</span>}
+                <input type="number" value={val} onChange={e=>setter(+e.target.value)} style={{flex:1,background:"transparent",border:"none",outline:"none",padding:"8px 10px",fontSize:13,fontFamily:"'DM Mono',monospace",color:"#111827"}}/>
+                {unit!=="$"&&<span style={{padding:"0 8px",color:"#9ca3af",fontSize:12,background:"#f3f4f6",borderLeft:"1px solid #e5e7eb"}}>{unit}</span>}
               </div>
             </div>
-            <div style={{display:"flex",alignItems:"flex-end",gap:6,height:160,padding:"0 4px"}}>
-              {projections.map((p,i)=>(
-                <div key={i} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:4}}>
-                  <div style={{width:"100%",display:"flex",gap:2,alignItems:"flex-end",height:130}}>
-                    <div style={{flex:1,background:"#10b981",borderRadius:"4px 4px 0 0",opacity:0.85,height:`${(p.totalValue/maxVal)*100}%`,minHeight:4,transition:"height 0.4s"}}/>
-                    <div style={{flex:1,background:"#7c3aed",borderRadius:"4px 4px 0 0",opacity:0.85,height:`${(p.totalEquity/maxVal)*100}%`,minHeight:4,transition:"height 0.4s"}}/>
-                  </div>
-                  <span style={{fontSize:9,color:"#9ca3af",whiteSpace:"nowrap"}}>Yr {p.year}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Projection table */}
-          <div style={{overflowX:"auto"}}>
-            <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
-              <thead>
-                <tr style={{background:"#f9fafb"}}>
-                  {["Year","Portfolio Value","Total Equity","Monthly CF","Properties"].map(h=>(
-                    <th key={h} style={{padding:"8px 12px",textAlign:"right",fontWeight:700,color:"#6b7280",letterSpacing:"0.04em",fontSize:10,textTransform:"uppercase",borderBottom:"1.5px solid #e5e7eb"}}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {projections.map((p,i)=>(
-                  <tr key={i} style={{background:i%2===0?"white":"#fafafa",transition:"background 0.1s"}}
-                    onMouseEnter={e=>e.currentTarget.style.background="#f0fdf4"}
-                    onMouseLeave={e=>e.currentTarget.style.background=i%2===0?"white":"#fafafa"}>
-                    <td style={{padding:"10px 12px",fontWeight:i===0?600:800,color:i===0?"#9ca3af":"#111827",borderBottom:"1px solid #f3f4f6"}}>{i===0?"Now":`Year ${p.year}`}</td>
-                    <td style={{padding:"10px 12px",textAlign:"right",fontFamily:"'DM Mono',monospace",fontWeight:700,color:"#059669",borderBottom:"1px solid #f3f4f6"}}>{fmtM(p.totalValue)}</td>
-                    <td style={{padding:"10px 12px",textAlign:"right",fontFamily:"'DM Mono',monospace",fontWeight:700,color:"#7c3aed",borderBottom:"1px solid #f3f4f6"}}>{fmtM(p.totalEquity)}</td>
-                    <td style={{padding:"10px 12px",textAlign:"right",fontFamily:"'DM Mono',monospace",fontWeight:700,color:p.monthlyCF>=0?"#059669":"#dc2626",borderBottom:"1px solid #f3f4f6"}}>{fmtD(p.monthlyCF)}/mo</td>
-                    <td style={{padding:"10px 12px",textAlign:"right",fontFamily:"'DM Mono',monospace",color:"#374151",borderBottom:"1px solid #f3f4f6"}}>{p.properties}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          ))}
         </div>
-      </div>
-
-      <div style={{display:"flex",justifyContent:"flex-end"}}>
-        <Btn variant="primary" onClick={handleSave}>Save Portfolio</Btn>
+        {/* Results */}
+        <div style={{background:sim.infinite?"linear-gradient(135deg,#064e3b,#065f46)":"#f9fafb",borderRadius:12,padding:"16px 18px",marginBottom:14}}>
+          <div style={{fontSize:10,fontWeight:700,color:sim.infinite?"rgba(255,255,255,0.6)":"#9ca3af",textTransform:"uppercase",marginBottom:8}}>Cash Out</div>
+          <div style={{fontSize:26,fontWeight:800,fontFamily:"'DM Mono',monospace",color:sim.infinite?"#6ee7b7":sim.cashOut>=0?"#059669":"#dc2626"}}>{sim.cashOut>=0?fmtD(sim.cashOut):`Need ${fmtD(-sim.cashOut)} more equity`}</div>
+          {sim.infinite&&<div style={{fontSize:11,color:"rgba(255,255,255,0.7)",marginTop:3}}>∞ Infinite return — all capital recycled!</div>}
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
+          {[["New Loan",fmtD(sim.newLoan),""],["New Payment",fmtD(sim.newPmt)+"/mo",""],["New Cash Flow",fmtD(sim.newMcf)+"/mo",sim.newMcf>=0?"pos":sim.newMcf<0?"neg":""],["New DSCR",sim.newDscr.toFixed(2)+"x",""]].map(([l,v,flag])=>(
+            <div key={l} style={{background:flag==="pos"?"#f0fdf4":flag==="neg"?"#fef2f2":"#f9fafb",borderRadius:10,padding:"12px 14px",border:`1px solid ${flag==="pos"?"#bbf7d0":flag==="neg"?"#fecaca":"#e5e7eb"}`}}>
+              <div style={{fontSize:9,color:"#9ca3af",fontWeight:700,textTransform:"uppercase",marginBottom:4}}>{l}</div>
+              <div style={{fontSize:16,fontWeight:800,fontFamily:"'DM Mono',monospace",color:flag==="pos"?"#059669":flag==="neg"?"#dc2626":l==="New DSCR"?dscrColor:"#111827"}}>{v}</div>
+            </div>
+          ))}
+        </div>
+        <div style={{display:"flex",justifyContent:"space-between",padding:"10px 14px",background:"#fffbeb",borderRadius:8,border:"1px solid #fde68a"}}>
+          <span style={{fontSize:12,color:"#92400e"}}>Cash Left in Deal</span>
+          <span style={{fontSize:13,fontWeight:800,fontFamily:"'DM Mono',monospace",color:sim.cashLeft===0?"#059669":"#374151"}}>{sim.cashLeft===0?"$0 — Fully Recycled 🎯":fmtD(sim.cashLeft)}</span>
+        </div>
       </div>
     </div>
   );
 }
+
+// ─── PORTFOLIO ANALYZER (Full Pro Version) ────────────────────────────────────
+function PortfolioAnalyzer({profile,onSave}) {
+  const [properties,setProperties]=useState(profile?.portfolio_properties||[]);
+  const [showAdd,setShowAdd]=useState(false);
+  const [refiProp,setRefiProp]=useState(null);
+  const [expandedProp,setExpandedProp]=useState(null);
+  const [portfolioTab,setPortfolioTab]=useState("properties"); // properties | projections | risks
+  const [newProp,setNewProp]=useState({
+    address:"",type:"Single Family",value:"",loan_balance:"",
+    monthly_rent:"",monthly_expenses:"",monthly_mortgage:"",
+    mortgage_rate:"7",mortgage_term:"30",notes:"",
+  });
+  const [projYears,setProjYears]=useState(5);
+  const [projGrowth,setProjGrowth]=useState(4);
+  const [projRentGrowth,setProjRentGrowth]=useState(2);
+  const [projExpGrowth,setProjExpGrowth]=useState(2);
+  const [projAcqTemplate,setProjAcqTemplate]=useState("rental");
+  const [projAcqValue,setProjAcqValue]=useState(250000);
+  const [projAcqCF,setProjAcqCF]=useState(400);
+  const [projAcqCount,setProjAcqCount]=useState(1);
+  const np=k=>v=>setNewProp(p=>({...p,[k]:v}));
+
+  // Per-property calcs
+  const propCalcs=useMemo(()=>properties.map(p=>({...p,...scoreProperty(p)})),[properties]);
+
+  // Portfolio totals
+  const totals=useMemo(()=>{
+    const tv=propCalcs.reduce((s,p)=>s+(parseFloat(p.value)||0),0);
+    const tl=propCalcs.reduce((s,p)=>s+(parseFloat(p.loan_balance)||0),0);
+    const te=tv-tl;
+    const tmcf=propCalcs.reduce((s,p)=>s+p.mcf,0);
+    const tacf=tmcf*12;
+    const tnoi=propCalcs.reduce((s,p)=>s+p.noi,0);
+    const tdebt=propCalcs.reduce((s,p)=>s+(parseFloat(p.monthly_mortgage)||0),0);
+    const wdscr=tdebt>0?propCalcs.reduce((s,p)=>s+p.dscr*(parseFloat(p.monthly_mortgage)||0),0)/tdebt:0;
+    const wltv=tv>0?tl/tv:0;
+    const coc=te>0?tacf/te:0;
+    const capitalDeployed=propCalcs.reduce((s,p)=>s+(parseFloat(p.value)||0)*0.2,0); // rough
+    const riskCount=propCalcs.filter(p=>p.flags.length>0).length;
+    return{tv,tl,te,tmcf,tacf,tnoi,wdscr,wltv,coc,capitalDeployed,riskCount,count:properties.length};
+  },[propCalcs]);
+
+  // Grade distribution
+  const gradeDist=useMemo(()=>{
+    const grades={};
+    propCalcs.forEach(p=>{grades[p.grade]=(grades[p.grade]||0)+1;});
+    return grades;
+  },[propCalcs]);
+
+  // Projections
+  const projections=useMemo(()=>{
+    return Array.from({length:projYears+1},(_,yr)=>{
+      const valY=totals.tv*Math.pow(1+projGrowth/100,yr);
+      const loanY=totals.tl*(1-yr/(30)); // rough paydown
+      const equityY=valY-Math.max(loanY,0);
+      const rentGrowthFactor=Math.pow(1+projRentGrowth/100,yr);
+      const expGrowthFactor=Math.pow(1+projExpGrowth/100,yr);
+      const baseMcf=propCalcs.reduce((s,p)=>{
+        const rentY=(parseFloat(p.monthly_rent)||0)*rentGrowthFactor;
+        const expY=(parseFloat(p.monthly_expenses)||0)*expGrowthFactor;
+        return s+rentY-expY-(parseFloat(p.monthly_mortgage)||0);
+      },0);
+      const newUnitsCF=yr>0?projAcqCount*yr*projAcqCF:0;
+      const newUnitsVal=yr>0?projAcqCount*yr*projAcqValue*Math.pow(1+projGrowth/100,yr/2):0;
+      return{yr,val:Math.round(valY+newUnitsVal),equity:Math.round(equityY+newUnitsVal*0.2),mcf:Math.round(baseMcf+newUnitsCF),props:totals.count+(yr>0?projAcqCount*yr:0)};
+    });
+  },[totals,propCalcs,projYears,projGrowth,projRentGrowth,projExpGrowth,projAcqCount,projAcqValue,projAcqCF]);
+
+  const maxProjVal=Math.max(...projections.map(p=>p.val),1);
+
+  const addProp=()=>{
+    if(!newProp.address)return;
+    setProperties(prev=>[...prev,{...newProp,id:Date.now().toString()}]);
+    setNewProp({address:"",type:"Single Family",value:"",loan_balance:"",monthly_rent:"",monthly_expenses:"",monthly_mortgage:"",mortgage_rate:"7",mortgage_term:"30",notes:""});
+    setShowAdd(false);
+  };
+  const removeProp=id=>setProperties(p=>p.filter(x=>x.id!==id));
+  const handleSave=()=>onSave({portfolio_properties:properties,portfolio_value:totals.tv});
+
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:20}}>
+      {refiProp&&<RefiSimulator prop={refiProp} onClose={()=>setRefiProp(null)}/>}
+
+      {/* ── DASHBOARD SUMMARY ── */}
+      <div style={{background:"linear-gradient(135deg,#064e3b,#065f46)",borderRadius:18,padding:"24px 28px"}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:20,flexWrap:"wrap",gap:10}}>
+          <div>
+            <h2 style={{fontFamily:"'Fraunces',serif",fontSize:20,fontWeight:800,color:"white",marginBottom:3}}>Portfolio Dashboard</h2>
+            <p style={{fontSize:12,color:"rgba(255,255,255,0.5)"}}>{totals.count} propert{totals.count===1?"y":"ies"} · Live calculations</p>
+          </div>
+          {totals.riskCount>0&&<div style={{background:"rgba(220,38,38,0.2)",border:"1px solid rgba(220,38,38,0.4)",borderRadius:8,padding:"6px 12px"}}><span style={{fontSize:12,color:"#fca5a5",fontWeight:700}}>⚠️ {totals.riskCount} propert{totals.riskCount===1?"y":"ies"} need attention</span></div>}
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:12}}>
+          {[
+            ["Total Value",fmtM(totals.tv),"#6ee7b7"],
+            ["Total Equity",fmtM(totals.te),"#a78bfa"],
+            ["Total Loan",fmtM(totals.tl),"#fde68a"],
+            ["Mo. Cash Flow",fmtD(totals.tmcf),totals.tmcf>=0?"#6ee7b7":"#fca5a5"],
+            ["Annual CF",fmtD(totals.tacf),totals.tacf>=0?"#6ee7b7":"#fca5a5"],
+            ["Avg DSCR",totals.wdscr.toFixed(2)+"x",totals.wdscr>=1.35?"#6ee7b7":totals.wdscr>=1.2?"#fde68a":"#fca5a5"],
+            ["Avg LTV",fmtP(totals.wltv),totals.wltv<=0.75?"#6ee7b7":totals.wltv<=0.85?"#fde68a":"#fca5a5"],
+            ["Portfolio CoC",fmtP(totals.coc),totals.coc>=0.08?"#6ee7b7":"#fde68a"],
+          ].map(([label,val,color])=>(
+            <div key={label} style={{background:"rgba(255,255,255,0.07)",borderRadius:12,padding:"14px 12px",border:"1px solid rgba(255,255,255,0.1)"}}>
+              <div style={{fontSize:9,color:"rgba(255,255,255,0.45)",fontWeight:700,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:6}}>{label}</div>
+              <div style={{fontSize:17,fontWeight:800,fontFamily:"'DM Mono',monospace",color}}>{val}</div>
+            </div>
+          ))}
+        </div>
+        {/* LTV bar */}
+        {totals.tv>0&&<div style={{marginTop:18}}>
+          <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
+            <span style={{fontSize:11,color:"rgba(255,255,255,0.5)"}}>Portfolio Equity vs Debt</span>
+            <span style={{fontSize:11,color:"rgba(255,255,255,0.5)"}}>{fmtP(1-totals.wltv)} equity · {fmtP(totals.wltv)} debt</span>
+          </div>
+          <div style={{height:8,background:"rgba(255,255,255,0.1)",borderRadius:4,overflow:"hidden",display:"flex"}}>
+            <div style={{width:`${(1-totals.wltv)*100}%`,background:"linear-gradient(90deg,#10b981,#6ee7b7)",transition:"width 0.5s"}}/>
+          </div>
+        </div>}
+      </div>
+
+      {/* Grade distribution chips */}
+      {properties.length>0&&(
+        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          {Object.entries(gradeDist).map(([grade,count])=>{
+            const g=propCalcs.find(p=>p.grade===grade);
+            return <div key={grade} style={{display:"flex",alignItems:"center",gap:6,padding:"6px 14px",borderRadius:100,background:g?.gradeBg||"#f3f4f6",border:`1.5px solid ${g?.gradeColor||"#e5e7eb"}20`}}>
+              <span style={{fontSize:13}}>{g?.gradeIcon}</span>
+              <span style={{fontSize:12,fontWeight:700,color:g?.gradeColor||"#374151"}}>{grade}</span>
+              <span style={{fontSize:11,color:g?.gradeColor||"#9ca3af",opacity:0.7}}>×{count}</span>
+            </div>;
+          })}
+        </div>
+      )}
+
+      {/* Tabs */}
+      <div style={{display:"flex",background:"#f3f4f6",borderRadius:10,padding:3,gap:2}}>
+        {[["properties","🏠 Properties"],["projections","🔮 Projections"],["risks","⚠️ Risk Report"]].map(([key,label])=>(
+          <button key={key} onClick={()=>setPortfolioTab(key)} style={{flex:1,padding:"8px 12px",borderRadius:8,border:"none",background:portfolioTab===key?"white":"transparent",color:portfolioTab===key?"#111827":"#6b7280",fontSize:12,fontWeight:portfolioTab===key?700:500,cursor:"pointer",boxShadow:portfolioTab===key?"0 1px 4px rgba(0,0,0,0.08)":"none",transition:"all 0.15s"}}>{label}</button>
+        ))}
+      </div>
+
+      {/* ── PROPERTIES TAB ── */}
+      {portfolioTab==="properties"&&(
+        <div style={{background:"white",borderRadius:14,border:"1.5px solid #e5e7eb",overflow:"hidden"}}>
+          <div style={{padding:"16px 22px",borderBottom:"1px solid #f3f4f6",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+            <h3 style={{fontSize:15,fontWeight:700,color:"#111827"}}>My Properties</h3>
+            <button onClick={()=>setShowAdd(v=>!v)} style={{display:"flex",alignItems:"center",gap:6,padding:"7px 14px",borderRadius:8,border:"1.5px solid #bbf7d0",background:"#f0fdf4",color:"#059669",fontSize:12,fontWeight:700,cursor:"pointer"}}>+ Add Property</button>
+          </div>
+
+          {showAdd&&(
+            <div style={{padding:"18px 22px",background:"#fafafa",borderBottom:"1px solid #f3f4f6"}}>
+              <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr 1fr",gap:10,marginBottom:10}}>
+                <input value={newProp.address} onChange={e=>np("address")(e.target.value)} placeholder="Address *" style={{padding:"8px 10px",borderRadius:8,border:"1.5px solid #e5e7eb",fontSize:12,outline:"none",fontFamily:"'DM Sans',sans-serif"}}/>
+                <select value={newProp.type} onChange={e=>np("type")(e.target.value)} style={{padding:"8px 10px",borderRadius:8,border:"1.5px solid #e5e7eb",fontSize:12,outline:"none"}}>
+                  {["Single Family","Multi-Family","Commercial","STR","Vacant Land"].map(t=><option key={t}>{t}</option>)}
+                </select>
+                <input type="number" value={newProp.value} onChange={e=>np("value")(e.target.value)} placeholder="Market Value $" style={{padding:"8px 10px",borderRadius:8,border:"1.5px solid #e5e7eb",fontSize:12,outline:"none",fontFamily:"'DM Mono',monospace"}}/>
+                <input type="number" value={newProp.loan_balance} onChange={e=>np("loan_balance")(e.target.value)} placeholder="Loan Balance $" style={{padding:"8px 10px",borderRadius:8,border:"1.5px solid #e5e7eb",fontSize:12,outline:"none",fontFamily:"'DM Mono',monospace"}}/>
+                <input type="number" value={newProp.monthly_rent} onChange={e=>np("monthly_rent")(e.target.value)} placeholder="Monthly Rent $" style={{padding:"8px 10px",borderRadius:8,border:"1.5px solid #e5e7eb",fontSize:12,outline:"none",fontFamily:"'DM Mono',monospace"}}/>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr 1fr",gap:10,marginBottom:12}}>
+                <input type="number" value={newProp.monthly_expenses} onChange={e=>np("monthly_expenses")(e.target.value)} placeholder="Expenses/mo $" style={{padding:"8px 10px",borderRadius:8,border:"1.5px solid #e5e7eb",fontSize:12,outline:"none",fontFamily:"'DM Mono',monospace"}}/>
+                <input type="number" value={newProp.monthly_mortgage} onChange={e=>np("monthly_mortgage")(e.target.value)} placeholder="Mortgage/mo $" style={{padding:"8px 10px",borderRadius:8,border:"1.5px solid #e5e7eb",fontSize:12,outline:"none",fontFamily:"'DM Mono',monospace"}}/>
+                <input type="number" value={newProp.mortgage_rate} onChange={e=>np("mortgage_rate")(e.target.value)} placeholder="Rate %" style={{padding:"8px 10px",borderRadius:8,border:"1.5px solid #e5e7eb",fontSize:12,outline:"none",fontFamily:"'DM Mono',monospace"}}/>
+                <input type="number" value={newProp.mortgage_term} onChange={e=>np("mortgage_term")(e.target.value)} placeholder="Term yr" style={{padding:"8px 10px",borderRadius:8,border:"1.5px solid #e5e7eb",fontSize:12,outline:"none",fontFamily:"'DM Mono',monospace"}}/>
+                <input value={newProp.notes} onChange={e=>np("notes")(e.target.value)} placeholder="Notes" style={{padding:"8px 10px",borderRadius:8,border:"1.5px solid #e5e7eb",fontSize:12,outline:"none",fontFamily:"'DM Sans',sans-serif"}}/>
+              </div>
+              <div style={{display:"flex",gap:8}}>
+                <Btn variant="ghost" small onClick={()=>setShowAdd(false)}>Cancel</Btn>
+                <Btn variant="primary" small disabled={!newProp.address} onClick={addProp}>Add Property</Btn>
+              </div>
+            </div>
+          )}
+
+          {propCalcs.length===0?(
+            <div style={{padding:"40px",textAlign:"center",color:"#9ca3af"}}>
+              <div style={{fontSize:36,marginBottom:10}}>🏠</div>
+              <p style={{fontSize:14}}>No properties yet. Add one to start tracking.</p>
+            </div>
+          ):(
+            propCalcs.map((prop,idx)=>(
+              <div key={prop.id} style={{borderBottom:idx<propCalcs.length-1?"1px solid #f3f4f6":"none"}}>
+                {/* Property row */}
+                <div style={{padding:"16px 22px",display:"flex",alignItems:"center",gap:14,cursor:"pointer"}} onClick={()=>setExpandedProp(expandedProp===prop.id?null:prop.id)}>
+                  {/* Grade badge */}
+                  <div style={{width:42,height:42,borderRadius:10,background:prop.gradeBg,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,border:`1.5px solid ${prop.gradeColor}30`}}>
+                    <span style={{fontSize:20}}>{prop.gradeIcon}</span>
+                  </div>
+                  {/* Address + grade */}
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:2,flexWrap:"wrap"}}>
+                      <span style={{fontSize:14,fontWeight:700,color:"#111827"}}>{prop.address}</span>
+                      <span style={{fontSize:10,background:prop.gradeBg,color:prop.gradeColor,padding:"1px 8px",borderRadius:100,fontWeight:700,border:`1px solid ${prop.gradeColor}30`}}>{prop.grade}</span>
+                      <span style={{fontSize:10,background:"#f3f4f6",color:"#6b7280",padding:"1px 8px",borderRadius:100}}>{prop.type}</span>
+                      {prop.flags.map(f=><span key={f} style={{fontSize:10,background:"#fef2f2",color:"#dc2626",padding:"1px 8px",borderRadius:100,border:"1px solid #fecaca"}}>⚠️ {f}</span>)}
+                    </div>
+                    <div style={{fontSize:11,color:"#9ca3af"}}>Score: {prop.score}/100 · {prop.gradePurpose}</div>
+                  </div>
+                  {/* Key stats */}
+                  <div style={{display:"flex",gap:16,flexShrink:0,flexWrap:"wrap"}}>
+                    {[["Value",fmtM(parseFloat(prop.value)||0),"#111827"],["Equity",fmtM(prop.equity),"#7c3aed"],["CF/mo",fmtD(prop.mcf),prop.mcf>=0?"#059669":"#dc2626"],["DSCR",prop.dscr>0?prop.dscr.toFixed(2)+"x":"—",prop.dscr>=1.35?"#059669":prop.dscr>=1.2?"#d97706":"#dc2626"]].map(([l,v,c])=>(
+                      <div key={l} style={{textAlign:"center"}}>
+                        <div style={{fontSize:14,fontWeight:800,fontFamily:"'DM Mono',monospace",color:c}}>{v}</div>
+                        <div style={{fontSize:9,color:"#9ca3af",textTransform:"uppercase"}}>{l}</div>
+                      </div>
+                    ))}
+                  </div>
+                  <span style={{fontSize:12,color:"#9ca3af",flexShrink:0}}>{expandedProp===prop.id?"▲":"▼"}</span>
+                </div>
+
+                {/* Expanded detail */}
+                {expandedProp===prop.id&&(
+                  <div style={{padding:"0 22px 18px",background:"#fafafa",borderTop:"1px solid #f3f4f6"}}>
+                    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:10,marginBottom:14,paddingTop:14}}>
+                      {[
+                        ["LTV",fmtP(prop.ltv),prop.ltv<=0.75?"#059669":prop.ltv<=0.85?"#d97706":"#dc2626"],
+                        ["Cash-on-Cash",fmtP(prop.coc),prop.coc>=0.08?"#059669":"#d97706"],
+                        ["Annual CF",fmtD(prop.acf),prop.acf>=0?"#059669":"#dc2626"],
+                        ["NOI",fmtD(prop.noi),"#374151"],
+                        ["Expense Ratio",fmtP(prop.expRatio),prop.expRatio<=0.5?"#059669":"#dc2626"],
+                        ["Break-Even Occ.",fmtP(prop.breakEven),"#374151"],
+                      ].map(([l,v,c])=>(
+                        <div key={l} style={{background:"white",borderRadius:10,padding:"10px 12px",border:"1.5px solid #e5e7eb",textAlign:"center"}}>
+                          <div style={{fontSize:9,color:"#9ca3af",fontWeight:700,textTransform:"uppercase",marginBottom:4}}>{l}</div>
+                          <div style={{fontSize:15,fontWeight:800,fontFamily:"'DM Mono',monospace",color:c}}>{v}</div>
+                        </div>
+                      ))}
+                    </div>
+                    {/* Score bar */}
+                    <div style={{marginBottom:14}}>
+                      <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+                        <span style={{fontSize:11,fontWeight:600,color:"#374151"}}>Property Score</span>
+                        <span style={{fontSize:11,fontWeight:800,color:prop.gradeColor}}>{prop.score}/100 — {prop.grade}</span>
+                      </div>
+                      <div style={{height:8,background:"#f3f4f6",borderRadius:4,overflow:"hidden"}}>
+                        <div style={{height:"100%",width:`${prop.score}%`,background:prop.gradeColor,borderRadius:4,transition:"width 0.5s"}}/>
+                      </div>
+                    </div>
+                    <div style={{display:"flex",gap:8}}>
+                      <button onClick={()=>setRefiProp(prop)} style={{padding:"8px 16px",borderRadius:8,border:"1.5px solid #bfdbfe",background:"#eff6ff",color:"#2563eb",fontSize:12,fontWeight:700,cursor:"pointer"}}>🏦 Refi Simulator</button>
+                      <button onClick={()=>removeProp(prop.id)} style={{padding:"8px 14px",borderRadius:8,border:"1.5px solid #fee2e2",background:"#fff5f5",color:"#dc2626",fontSize:12,cursor:"pointer"}}>Remove</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))
+          )}
+        </div>
+      )}
+
+      {/* ── PROJECTIONS TAB ── */}
+      {portfolioTab==="projections"&&(
+        <div style={{background:"white",borderRadius:14,border:"1.5px solid #e5e7eb",overflow:"hidden"}}>
+          <div style={{padding:"16px 22px",borderBottom:"1px solid #f3f4f6",background:"linear-gradient(135deg,#f0fdf4,#ecfdf5)"}}>
+            <h3 style={{fontSize:15,fontWeight:700,color:"#111827",marginBottom:2}}>🔮 Future Scaling Engine</h3>
+            <p style={{fontSize:12,color:"#6b7280"}}>Project your portfolio with growth assumptions + future acquisitions</p>
+          </div>
+          <div style={{padding:"22px"}}>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:12,marginBottom:24}}>
+              {[["Proj. Years",projYears,setProjYears,"yr"],["Appreciation %",projGrowth,setProjGrowth,"%"],["Rent Growth %",projRentGrowth,setProjRentGrowth,"%"],["Expense Growth",projExpGrowth,setProjExpGrowth,"%"],["Acquisitions/yr",projAcqCount,setProjAcqCount,"props"],["Avg Value",projAcqValue,setProjAcqValue,"$"],["Avg CF/prop",projAcqCF,setProjAcqCF,"$"]].map(([label,val,setter,unit])=>(
+                <div key={label}>
+                  <label style={{fontSize:10,fontWeight:700,color:"#6b7280",textTransform:"uppercase",letterSpacing:"0.05em",display:"block",marginBottom:4}}>{label}</label>
+                  <input type="number" value={val} onChange={e=>setter(+e.target.value)} style={{width:"100%",padding:"8px 10px",borderRadius:8,border:"1.5px solid #e5e7eb",fontSize:13,fontFamily:"'DM Mono',monospace",outline:"none",color:"#111827"}}/>
+                  <span style={{fontSize:9,color:"#9ca3af"}}>{unit}</span>
+                </div>
+              ))}
+            </div>
+            {/* Bar chart */}
+            <div style={{marginBottom:20}}>
+              <div style={{display:"flex",justifyContent:"space-between",marginBottom:10}}>
+                <span style={{fontSize:12,fontWeight:700,color:"#374151"}}>Portfolio Value & Equity</span>
+                <div style={{display:"flex",gap:12}}>
+                  {[["#10b981","Value"],["#7c3aed","Equity"]].map(([c,l])=><div key={l} style={{display:"flex",alignItems:"center",gap:4}}><div style={{width:9,height:9,borderRadius:2,background:c}}/><span style={{fontSize:10,color:"#6b7280"}}>{l}</span></div>)}
+                </div>
+              </div>
+              <div style={{display:"flex",alignItems:"flex-end",gap:4,height:140,padding:"0 2px"}}>
+                {projections.map((p,i)=>(
+                  <div key={i} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:3}}>
+                    <div style={{width:"100%",display:"flex",gap:2,alignItems:"flex-end",height:120}}>
+                      <div style={{flex:1,background:"#10b981",borderRadius:"3px 3px 0 0",opacity:0.85,height:`${(p.val/maxProjVal)*100}%`,minHeight:3,transition:"height 0.4s"}}/>
+                      <div style={{flex:1,background:"#7c3aed",borderRadius:"3px 3px 0 0",opacity:0.85,height:`${(p.equity/maxProjVal)*100}%`,minHeight:3,transition:"height 0.4s"}}/>
+                    </div>
+                    <span style={{fontSize:8,color:"#9ca3af"}}>Y{p.yr}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+            {/* Projection table */}
+            <div style={{overflowX:"auto"}}>
+              <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+                <thead><tr style={{background:"#f9fafb"}}>{["Year","Portfolio Value","Total Equity","Mo. CF","Properties","Capital Needed"].map(h=><th key={h} style={{padding:"8px 10px",textAlign:"right",fontWeight:700,color:"#6b7280",fontSize:9,textTransform:"uppercase",borderBottom:"1.5px solid #e5e7eb"}}>{h}</th>)}</tr></thead>
+                <tbody>{projections.map((p,i)=>(
+                  <tr key={i} style={{background:i%2===0?"white":"#fafafa"}} onMouseEnter={e=>e.currentTarget.style.background="#f0fdf4"} onMouseLeave={e=>e.currentTarget.style.background=i%2===0?"white":"#fafafa"}>
+                    <td style={{padding:"9px 10px",fontWeight:i===0?500:700,color:i===0?"#9ca3af":"#111827",borderBottom:"1px solid #f3f4f6",textAlign:"right"}}>{i===0?"Now":`Yr ${p.yr}`}</td>
+                    <td style={{padding:"9px 10px",textAlign:"right",fontFamily:"'DM Mono',monospace",fontWeight:700,color:"#059669",borderBottom:"1px solid #f3f4f6"}}>{fmtM(p.val)}</td>
+                    <td style={{padding:"9px 10px",textAlign:"right",fontFamily:"'DM Mono',monospace",fontWeight:700,color:"#7c3aed",borderBottom:"1px solid #f3f4f6"}}>{fmtM(p.equity)}</td>
+                    <td style={{padding:"9px 10px",textAlign:"right",fontFamily:"'DM Mono',monospace",fontWeight:700,color:p.mcf>=0?"#059669":"#dc2626",borderBottom:"1px solid #f3f4f6"}}>{fmtD(p.mcf)}/mo</td>
+                    <td style={{padding:"9px 10px",textAlign:"right",fontFamily:"'DM Mono',monospace",color:"#374151",borderBottom:"1px solid #f3f4f6"}}>{p.props}</td>
+                    <td style={{padding:"9px 10px",textAlign:"right",fontFamily:"'DM Mono',monospace",color:"#6b7280",borderBottom:"1px solid #f3f4f6"}}>{i===0?"—":fmtM(projAcqCount*projAcqValue*i*0.2)}</td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── RISK TAB ── */}
+      {portfolioTab==="risks"&&(
+        <div style={{background:"white",borderRadius:14,border:"1.5px solid #e5e7eb",overflow:"hidden"}}>
+          <div style={{padding:"16px 22px",borderBottom:"1px solid #f3f4f6",background:"#fef2f2"}}>
+            <h3 style={{fontSize:15,fontWeight:700,color:"#111827",marginBottom:2}}>⚠️ Portfolio Risk Report</h3>
+            <p style={{fontSize:12,color:"#6b7280"}}>Properties flagged for attention</p>
+          </div>
+          <div style={{padding:"22px"}}>
+            {propCalcs.filter(p=>p.flags.length>0).length===0?(
+              <div style={{textAlign:"center",padding:"40px",color:"#9ca3af"}}>
+                <div style={{fontSize:36,marginBottom:10}}>✅</div>
+                <p style={{fontSize:14,fontWeight:600,color:"#059669"}}>No risk flags! Portfolio looks healthy.</p>
+              </div>
+            ):(
+              propCalcs.filter(p=>p.flags.length>0).map(prop=>(
+                <div key={prop.id} style={{marginBottom:16,padding:"16px 18px",background:"#fef2f2",borderRadius:12,border:"1.5px solid #fecaca"}}>
+                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8,flexWrap:"wrap",gap:8}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8}}>
+                      <span style={{fontSize:16}}>{prop.gradeIcon}</span>
+                      <span style={{fontSize:14,fontWeight:700,color:"#111827"}}>{prop.address}</span>
+                      <span style={{fontSize:10,background:prop.gradeBg,color:prop.gradeColor,padding:"1px 8px",borderRadius:100,fontWeight:700}}>{prop.grade}</span>
+                    </div>
+                    <button onClick={()=>setRefiProp(prop)} style={{padding:"6px 14px",borderRadius:8,border:"1.5px solid #bfdbfe",background:"#eff6ff",color:"#2563eb",fontSize:11,fontWeight:700,cursor:"pointer"}}>🏦 Simulate Refi</button>
+                  </div>
+                  <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:10}}>
+                    {prop.flags.map(f=><span key={f} style={{fontSize:11,background:"white",color:"#dc2626",padding:"3px 10px",borderRadius:100,border:"1px solid #fecaca",fontWeight:600}}>⚠️ {f}</span>)}
+                  </div>
+                  <div style={{display:"flex",gap:14,flexWrap:"wrap"}}>
+                    {[["CF/mo",fmtD(prop.mcf),prop.mcf>=0?"#059669":"#dc2626"],["DSCR",prop.dscr>0?prop.dscr.toFixed(2)+"x":"—",prop.dscr>=1.2?"#d97706":"#dc2626"],["LTV",fmtP(prop.ltv),prop.ltv<=0.8?"#d97706":"#dc2626"],["Score",`${prop.score}/100`,prop.gradeColor]].map(([l,v,c])=>(
+                      <div key={l}><div style={{fontSize:14,fontWeight:800,fontFamily:"'DM Mono',monospace",color:c}}>{v}</div><div style={{fontSize:9,color:"#9ca3af",textTransform:"uppercase"}}>{l}</div></div>
+                    ))}
+                  </div>
+                </div>
+              ))
+            )}
+            {/* Portfolio-level risk summary */}
+            <div style={{marginTop:16,padding:"16px 18px",background:"#f9fafb",borderRadius:12,border:"1.5px solid #e5e7eb"}}>
+              <div style={{fontSize:11,fontWeight:700,color:"#374151",marginBottom:12,textTransform:"uppercase",letterSpacing:"0.06em"}}>Portfolio Health Check</div>
+              {[
+                ["Weighted Avg DSCR",totals.wdscr.toFixed(2)+"x",totals.wdscr>=1.35?"✅":totals.wdscr>=1.2?"⚠️":"🔴"],
+                ["Weighted Avg LTV",fmtP(totals.wltv),totals.wltv<=0.75?"✅":totals.wltv<=0.85?"⚠️":"🔴"],
+                ["Properties with Negative CF",propCalcs.filter(p=>p.mcf<0).length+" of "+totals.count,propCalcs.filter(p=>p.mcf<0).length===0?"✅":"🔴"],
+                ["Properties with LTV > 80%",propCalcs.filter(p=>p.ltv>0.8).length+" of "+totals.count,propCalcs.filter(p=>p.ltv>0.8).length===0?"✅":"⚠️"],
+                ["High Expense Ratio (>50%)",propCalcs.filter(p=>p.expRatio>0.5).length+" of "+totals.count,propCalcs.filter(p=>p.expRatio>0.5).length===0?"✅":"⚠️"],
+              ].map(([label,val,icon])=>(
+                <div key={label} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",borderBottom:"1px solid #f3f4f6"}}>
+                  <span style={{fontSize:12,color:"#6b7280"}}>{label}</span>
+                  <div style={{display:"flex",alignItems:"center",gap:6}}><span style={{fontSize:12,fontWeight:700,fontFamily:"'DM Mono',monospace",color:"#374151"}}>{val}</span><span style={{fontSize:14}}>{icon}</span></div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div style={{display:"flex",justifyContent:"flex-end"}}>
+        <Btn variant="primary" onClick={handleSave}>💾 Save Portfolio</Btn>
+      </div>
+    </div>
+  );
+}
+
 
 // ─── Profile Page ──────────────────────────────────────────────────────────────
 function ProfilePage({user,profile,onUpdate,onSignOut,onBack}) {
@@ -1264,68 +2481,395 @@ function DealCard({deal,onLoad,onDelete}) {
 }
 
 // ─── Find a Mentor ─────────────────────────────────────────────────────────────
-function MentorDirectory() {
-  const [mentors,setMentors]=useState([]);const [loading,setLoading]=useState(true);
+// ─── MENTORING MARKETPLACE ─────────────────────────────────────────────────────
+
+// Tier system
+function getMentorTier(sessions, rating) {
+  const s=sessions||0, r=rating||0;
+  if(s>=100&&r>=4.8) return{tier:4,label:"Elite",color:"#7c3aed",bg:"#f5f3ff",fee:5,badge:"💎",perks:"Homepage · Invite-only · 5% fee"};
+  if(s>=20&&r>=4.7)  return{tier:3,label:"Featured",color:"#2563eb",bg:"#eff6ff",fee:7,badge:"⭐",perks:"Featured listing · Higher ranking · 7% fee"};
+  if(s>=5&&r>=4.0)   return{tier:2,label:"Verified",color:"#059669",bg:"#f0fdf4",fee:10,badge:"✓",perks:"Verified badge · 10% fee"};
+  return{tier:1,label:"New",color:"#6b7280",bg:"#f9fafb",fee:15,badge:"🌱",perks:"Building reputation · 15% fee"};
+}
+
+function StarRating({rating, count}) {
+  const stars = Math.round(rating||0);
+  return (
+    <div style={{display:"flex",alignItems:"center",gap:4}}>
+      <div style={{display:"flex",gap:1}}>
+        {[1,2,3,4,5].map(i=>(
+          <span key={i} style={{fontSize:12,color:i<=stars?"#f59e0b":"#e5e7eb"}}>★</span>
+        ))}
+      </div>
+      <span style={{fontSize:11,color:"#6b7280",fontWeight:600}}>{rating?(+rating).toFixed(1):"New"}{count>0?` (${count})`:""}</span>
+    </div>
+  );
+}
+
+// Booking modal
+function BookingModal({mentor, user, profile, onClose, onBooked}) {
+  const [step, setStep] = useState(1); // 1=select 2=confirm 3=done
+  const [sessionType, setSessionType] = useState("single");
+  const [selectedDate, setSelectedDate] = useState("");
+  const [selectedTime, setSelectedTime] = useState("");
+  const [goals, setGoals] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  const sessionOptions = [
+    {key:"single", label:"Single Session", duration:"60 min", price: mentor.hourly_rate||150, desc:"One-on-one deal review or strategy session"},
+    {key:"bundle3", label:"3-Session Bundle", duration:"3 × 60 min", price: Math.round((mentor.hourly_rate||150)*3*0.85), desc:"Save 15% — ideal for accountability"},
+    {key:"monthly", label:"Monthly Coaching", duration:"4 × 60 min/mo", price: Math.round((mentor.hourly_rate||150)*4*0.75), desc:"Ongoing support — save 25%"},
+  ];
+  const selected = sessionOptions.find(s=>s.key===sessionType);
+  const platformFee = Math.round(selected.price * (getMentorTier(mentor.mentoring_sessions, mentor.avg_rating).fee/100));
+  const mentorEarns = selected.price - platformFee;
+
+  const availableTimes = ["9:00 AM","10:00 AM","11:00 AM","1:00 PM","2:00 PM","3:00 PM","4:00 PM","5:00 PM"];
+
+  const handleBook = async() => {
+    setSubmitting(true);
+    try {
+      const booking = {
+        mentor_id: mentor.id,
+        client_id: user.id,
+        client_name: profile?.full_name||"Anonymous",
+        mentor_name: mentor.full_name,
+        session_type: sessionType,
+        session_date: selectedDate,
+        session_time: selectedTime,
+        goals: goals,
+        amount: selected.price,
+        platform_fee: platformFee,
+        mentor_earns: mentorEarns,
+        status: "pending",
+        created_at: new Date().toISOString(),
+      };
+      await supabase._fetch("/rest/v1/bookings",{method:"POST",body:JSON.stringify(booking)}).catch(()=>{});
+      setStep(3);
+      onBooked&&onBooked(booking);
+    } finally { setSubmitting(false); }
+  };
+
+  return (
+    <div onClick={e=>e.target===e.currentTarget&&onClose()} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.55)",backdropFilter:"blur(4px)",zIndex:700,display:"flex",alignItems:"center",justifyContent:"center",padding:24}}>
+      <div style={{background:"white",borderRadius:22,padding:0,maxWidth:500,width:"100%",boxShadow:"0 32px 80px rgba(0,0,0,0.18)",overflow:"hidden",animation:"popIn 0.2s cubic-bezier(0.34,1.56,0.64,1) both"}}>
+        {/* Header */}
+        <div style={{background:"linear-gradient(135deg,#064e3b,#065f46)",padding:"22px 28px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div>
+            <div style={{fontSize:12,color:"rgba(255,255,255,0.6)",marginBottom:3}}>Booking session with</div>
+            <div style={{fontSize:18,fontWeight:800,color:"white"}}>{mentor.full_name}</div>
+            {mentor.title&&<div style={{fontSize:12,color:"rgba(255,255,255,0.6)"}}>{mentor.title}</div>}
+          </div>
+          <button onClick={onClose} style={{background:"rgba(255,255,255,0.1)",border:"none",color:"white",width:32,height:32,borderRadius:"50%",cursor:"pointer",fontSize:16}}>✕</button>
+        </div>
+
+        <div style={{padding:"24px 28px"}}>
+          {step===1&&(<>
+            <div style={{fontSize:14,fontWeight:700,color:"#374151",marginBottom:14}}>Choose session type</div>
+            <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:20}}>
+              {sessionOptions.map(opt=>(
+                <button key={opt.key} onClick={()=>setSessionType(opt.key)} style={{padding:"14px 16px",borderRadius:12,border:`2px solid ${sessionType===opt.key?"#10b981":"#e5e7eb"}`,background:sessionType===opt.key?"#f0fdf4":"white",cursor:"pointer",textAlign:"left",transition:"all 0.15s",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <div>
+                    <div style={{fontSize:13,fontWeight:700,color:sessionType===opt.key?"#059669":"#374151"}}>{opt.label} <span style={{fontSize:11,color:"#9ca3af",fontWeight:400}}>({opt.duration})</span></div>
+                    <div style={{fontSize:11,color:"#9ca3af"}}>{opt.desc}</div>
+                  </div>
+                  <div style={{fontSize:17,fontWeight:800,fontFamily:"'DM Mono',monospace",color:sessionType===opt.key?"#059669":"#111827",flexShrink:0,marginLeft:12}}>${opt.price}</div>
+                </button>
+              ))}
+            </div>
+            <Btn variant="primary" fullWidth onClick={()=>setStep(2)}>Continue →</Btn>
+          </>)}
+
+          {step===2&&(<>
+            <div style={{fontSize:14,fontWeight:700,color:"#374151",marginBottom:14}}>Schedule & confirm</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:14}}>
+              <div>
+                <label style={{fontSize:11,fontWeight:600,color:"#6b7280",textTransform:"uppercase",display:"block",marginBottom:5}}>Preferred Date</label>
+                <input type="date" value={selectedDate} onChange={e=>setSelectedDate(e.target.value)} min={new Date().toISOString().split("T")[0]}
+                  style={{width:"100%",padding:"9px 12px",borderRadius:8,border:"1.5px solid #e5e7eb",fontSize:13,outline:"none",color:"#374151"}}/>
+              </div>
+              <div>
+                <label style={{fontSize:11,fontWeight:600,color:"#6b7280",textTransform:"uppercase",display:"block",marginBottom:5}}>Preferred Time</label>
+                <select value={selectedTime} onChange={e=>setSelectedTime(e.target.value)} style={{width:"100%",padding:"9px 12px",borderRadius:8,border:"1.5px solid #e5e7eb",fontSize:13,outline:"none",color:selectedTime?"#374151":"#9ca3af"}}>
+                  <option value="">Select time...</option>
+                  {availableTimes.map(t=><option key={t} value={t}>{t}</option>)}
+                </select>
+              </div>
+            </div>
+            <div style={{marginBottom:14}}>
+              <label style={{fontSize:11,fontWeight:600,color:"#6b7280",textTransform:"uppercase",display:"block",marginBottom:5}}>Your goals for this session</label>
+              <textarea value={goals} onChange={e=>setGoals(e.target.value)} placeholder="e.g. I want to review a BRRRR deal and understand if the numbers work..." rows={3}
+                style={{width:"100%",padding:"10px 12px",borderRadius:8,border:"1.5px solid #e5e7eb",fontSize:13,outline:"none",resize:"none",fontFamily:"'DM Sans',sans-serif",color:"#374151"}}/>
+            </div>
+            {/* Price breakdown */}
+            <div style={{background:"#f9fafb",borderRadius:10,padding:"12px 14px",marginBottom:16,border:"1.5px solid #e5e7eb"}}>
+              <div style={{fontSize:11,fontWeight:700,color:"#6b7280",textTransform:"uppercase",marginBottom:8}}>Booking Summary</div>
+              <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><span style={{fontSize:12,color:"#6b7280"}}>{selected.label}</span><span style={{fontSize:13,fontWeight:700,fontFamily:"'DM Mono',monospace",color:"#374151"}}>${selected.price}</span></div>
+              <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><span style={{fontSize:12,color:"#6b7280"}}>Platform fee ({getMentorTier(mentor.mentoring_sessions,mentor.avg_rating).fee}%)</span><span style={{fontSize:12,fontFamily:"'DM Mono',monospace",color:"#9ca3af"}}>Handled at checkout</span></div>
+              <div style={{height:1,background:"#e5e7eb",margin:"8px 0"}}/>
+              <div style={{display:"flex",justifyContent:"space-between"}}><span style={{fontSize:13,fontWeight:700,color:"#374151"}}>You pay</span><span style={{fontSize:16,fontWeight:800,fontFamily:"'DM Mono',monospace",color:"#059669"}}>${selected.price}</span></div>
+              <div style={{fontSize:10,color:"#9ca3af",marginTop:4}}>Funds held in escrow · Released after session · Cancellation policy applies</div>
+            </div>
+            <div style={{display:"flex",gap:10}}>
+              <Btn variant="ghost" onClick={()=>setStep(1)}>← Back</Btn>
+              <Btn variant="primary" fullWidth loading={submitting} disabled={!selectedDate||!selectedTime} onClick={handleBook}>Confirm Booking →</Btn>
+            </div>
+          </>)}
+
+          {step===3&&(
+            <div style={{textAlign:"center",padding:"20px 0"}}>
+              <div style={{fontSize:52,marginBottom:16}}>🎉</div>
+              <h3 style={{fontFamily:"'Fraunces',serif",fontSize:20,fontWeight:800,color:"#111827",marginBottom:8}}>Session Requested!</h3>
+              <p style={{fontSize:14,color:"#6b7280",lineHeight:1.6,marginBottom:20}}>Your booking request has been sent to <strong>{mentor.full_name}</strong>. They'll confirm within 24 hours. You'll receive a reminder before your session.</p>
+              <div style={{background:"#f0fdf4",borderRadius:12,padding:"14px 16px",marginBottom:20,border:"1.5px solid #bbf7d0",textAlign:"left"}}>
+                <div style={{fontSize:11,fontWeight:700,color:"#059669",textTransform:"uppercase",marginBottom:8}}>Booking Details</div>
+                <div style={{fontSize:13,color:"#374151"}}>{selected.label} · {selectedDate} at {selectedTime}</div>
+                <div style={{fontSize:13,color:"#374151"}}>${selected.price} · Held in escrow until session completes</div>
+              </div>
+              <Btn variant="primary" fullWidth onClick={onClose}>Done</Btn>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Review modal (shown after session)
+function ReviewModal({booking, onClose, onSubmit}) {
+  const [ratings, setRatings] = useState({knowledge:0,communication:0,value:0,recommend:0});
+  const [comment, setComment] = useState("");
+  const r=k=>v=>setRatings(p=>({...p,[k]:v}));
+  const avg = Object.values(ratings).filter(v=>v>0).reduce((a,b,_,arr)=>a+b/arr.length,0);
+
+  return (
+    <div onClick={e=>e.target===e.currentTarget&&onClose()} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",backdropFilter:"blur(4px)",zIndex:700,display:"flex",alignItems:"center",justifyContent:"center",padding:24}}>
+      <div style={{background:"white",borderRadius:20,padding:"28px",maxWidth:440,width:"100%",boxShadow:"0 24px 60px rgba(0,0,0,0.15)"}}>
+        <h3 style={{fontFamily:"'Fraunces',serif",fontSize:18,fontWeight:800,color:"#111827",marginBottom:4}}>Rate Your Session</h3>
+        <p style={{fontSize:12,color:"#9ca3af",marginBottom:20}}>with {booking?.mentor_name}</p>
+        {[["knowledge","Knowledge & Expertise"],["communication","Communication"],["value","Value for Money"],["recommend","Would Recommend"]].map(([key,label])=>(
+          <div key={key} style={{marginBottom:14}}>
+            <div style={{fontSize:12,fontWeight:600,color:"#374151",marginBottom:6}}>{label}</div>
+            <div style={{display:"flex",gap:6}}>
+              {[1,2,3,4,5].map(star=>(
+                <button key={star} onClick={()=>r(key)(star)} style={{fontSize:24,background:"none",border:"none",cursor:"pointer",color:star<=(ratings[key]||0)?"#f59e0b":"#e5e7eb",transition:"color 0.1s"}}>★</button>
+              ))}
+            </div>
+          </div>
+        ))}
+        <textarea value={comment} onChange={e=>setComment(e.target.value)} placeholder="Share your experience (optional)..." rows={3}
+          style={{width:"100%",padding:"10px 12px",borderRadius:8,border:"1.5px solid #e5e7eb",fontSize:13,outline:"none",resize:"none",fontFamily:"'DM Sans',sans-serif",marginBottom:16,color:"#374151"}}/>
+        <Btn variant="primary" fullWidth disabled={avg===0} onClick={()=>onSubmit({...ratings,avg,comment})}>Submit Review</Btn>
+      </div>
+    </div>
+  );
+}
+
+function MentorDirectory({user, profile}) {
+  const [mentors, setMentors] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [filterStrategy, setFilterStrategy] = useState("all");
+  const [filterVerified, setFilterVerified] = useState(false);
+  const [sortBy, setSortBy] = useState("rating");
+  const [bookingMentor, setBookingMentor] = useState(null);
+  const [reviewBooking, setReviewBooking] = useState(null);
+  const [myBookings, setMyBookings] = useState([]);
+  const [activeTab, setActiveTab] = useState("discover"); // discover | sessions
+
   useEffect(()=>{
-    supabase._fetch("/rest/v1/profiles?is_verified=eq.true&mentoring_enabled=eq.true&order=portfolio_value.desc&select=*")
+    supabase._fetch("/rest/v1/profiles?is_verified=eq.true&mentoring_enabled=eq.true&select=*")
       .then(d=>{setMentors(Array.isArray(d)?d:[]);setLoading(false);})
       .catch(()=>setLoading(false));
-  },[]);
+    if(user?.id) {
+      supabase._fetch(`/rest/v1/bookings?client_id=eq.${user.id}&order=created_at.desc&select=*`)
+        .then(d=>setMyBookings(Array.isArray(d)?d:[]))
+        .catch(()=>{});
+    }
+  },[user]);
+
+  const filtered = useMemo(()=>{
+    let list = [...mentors];
+    if(filterStrategy!=="all") list=list.filter(m=>(m.investor_type||"").toLowerCase().includes(filterStrategy.toLowerCase())||(m.mentoring_bio||"").toLowerCase().includes(filterStrategy.toLowerCase()));
+    if(filterVerified) list=list.filter(m=>m.is_verified);
+    list.sort((a,b)=>{
+      if(sortBy==="rating") return (b.avg_rating||0)-(a.avg_rating||0);
+      if(sortBy==="sessions") return (b.mentoring_sessions||0)-(a.mentoring_sessions||0);
+      if(sortBy==="price_low") return (a.hourly_rate||0)-(b.hourly_rate||0);
+      if(sortBy==="price_high") return (b.hourly_rate||0)-(a.hourly_rate||0);
+      return (b.portfolio_value||0)-(a.portfolio_value||0);
+    });
+    return list;
+  },[mentors,filterStrategy,filterVerified,sortBy]);
+
+  const submitReview = async(data) => {
+    await supabase._fetch(`/rest/v1/bookings?id=eq.${reviewBooking.id}`,{method:"PATCH",body:JSON.stringify({rating:data.avg,review:data.comment,rated:true})}).catch(()=>{});
+    setMyBookings(prev=>prev.map(b=>b.id===reviewBooking.id?{...b,rated:true}:b));
+    setReviewBooking(null);
+  };
+
+  const strategies = ["all","BRRRR","Wholesale","Fix & Flip","Subject-To","Rental","Novation"];
+
   return (
-    <div style={{maxWidth:960,margin:"0 auto",padding:"28px"}}>
-      <div style={{marginBottom:28}}>
-        <h2 style={{fontFamily:"'Fraunces',serif",fontSize:26,fontWeight:800,color:"#111827",marginBottom:4}}>🎓 Find a Mentor</h2>
-        <p style={{fontSize:13,color:"#9ca3af"}}>Verified investors offering 1-on-1 coaching sessions</p>
+    <div style={{maxWidth:1040,margin:"0 auto",padding:"28px"}}>
+      {bookingMentor&&<BookingModal mentor={bookingMentor} user={user} profile={profile} onClose={()=>setBookingMentor(null)} onBooked={b=>setMyBookings(p=>[b,...p])}/>}
+      {reviewBooking&&<ReviewModal booking={reviewBooking} onClose={()=>setReviewBooking(null)} onSubmit={submitReview}/>}
+
+      {/* Header */}
+      <div style={{marginBottom:24}}>
+        <h2 style={{fontFamily:"'Fraunces',serif",fontSize:26,fontWeight:800,color:"#111827",marginBottom:4}}>🎓 Mentor Marketplace</h2>
+        <p style={{fontSize:13,color:"#9ca3af"}}>Verified investors · Native booking · Escrow-protected payments</p>
       </div>
-      {loading?<div style={{textAlign:"center",padding:"60px",color:"#9ca3af"}}>Loading mentors...</div>
-      :mentors.length===0?<div style={{textAlign:"center",padding:"80px 24px"}}><div style={{fontSize:52,marginBottom:16}}>🎓</div><h3 style={{fontFamily:"'Fraunces',serif",fontSize:22,fontWeight:800,color:"#111827",marginBottom:8}}>No mentors yet</h3><p style={{fontSize:14,color:"#6b7280"}}>Verified investors can enable mentoring in their profile settings.</p></div>
-      :(
-        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:18}}>
-          {mentors.map(m=>{
-            const medal=getMedal(+(m.portfolio_value||0));
-            return (
-              <div key={m.id} style={{background:"white",borderRadius:18,border:"1.5px solid #e5e7eb",overflow:"hidden",transition:"all 0.2s"}}
-                onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-3px)";e.currentTarget.style.boxShadow="0 12px 32px rgba(0,0,0,0.08)";}}
-                onMouseLeave={e=>{e.currentTarget.style.transform="translateY(0)";e.currentTarget.style.boxShadow="none";}}>
-                <div style={{height:4,background:"linear-gradient(90deg,#10b981,#059669)"}}/>
-                <div style={{padding:"22px"}}>
-                  <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:14}}>
-                    <div style={{width:52,height:52,borderRadius:"50%",background:"linear-gradient(135deg,#10b981,#059669)",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
-                      <span style={{fontSize:20,fontWeight:800,color:"white"}}>{(m.full_name||"?")[0].toUpperCase()}</span>
-                    </div>
-                    <div>
-                      <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:2}}>
-                        <span style={{fontSize:15,fontWeight:700,color:"#111827"}}>{m.full_name}</span>
-                        <span style={{fontSize:14}}>{medal.icon}</span>
+
+      {/* Tabs */}
+      <div style={{display:"flex",background:"#f3f4f6",borderRadius:10,padding:3,gap:2,marginBottom:22,maxWidth:360}}>
+        {[["discover","🔍 Find a Mentor"],["sessions","📅 My Sessions"]].map(([key,label])=>(
+          <button key={key} onClick={()=>setActiveTab(key)} style={{flex:1,padding:"8px 12px",borderRadius:8,border:"none",background:activeTab===key?"white":"transparent",color:activeTab===key?"#111827":"#6b7280",fontSize:13,fontWeight:activeTab===key?700:500,cursor:"pointer",boxShadow:activeTab===key?"0 1px 4px rgba(0,0,0,0.08)":"none",transition:"all 0.15s"}}>{label}</button>
+        ))}
+      </div>
+
+      {/* ── DISCOVER TAB ── */}
+      {activeTab==="discover"&&(<>
+        {/* Filters */}
+        <div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:20,alignItems:"center"}}>
+          <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+            {strategies.map(s=>(
+              <button key={s} onClick={()=>setFilterStrategy(s)} style={{padding:"5px 13px",borderRadius:100,border:`1.5px solid ${filterStrategy===s?"#111827":"#e5e7eb"}`,background:filterStrategy===s?"#111827":"white",color:filterStrategy===s?"white":"#6b7280",fontSize:11,fontWeight:600,cursor:"pointer"}}>{s==="all"?"All Strategies":s}</button>
+            ))}
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:6,marginLeft:"auto"}}>
+            <span style={{fontSize:11,color:"#6b7280",whiteSpace:"nowrap"}}>Sort by:</span>
+            <select value={sortBy} onChange={e=>setSortBy(e.target.value)} style={{padding:"5px 10px",borderRadius:8,border:"1.5px solid #e5e7eb",fontSize:12,outline:"none",color:"#374151"}}>
+              <option value="rating">⭐ Rating</option>
+              <option value="sessions">🎓 Sessions</option>
+              <option value="price_low">💲 Price: Low</option>
+              <option value="price_high">💲 Price: High</option>
+              <option value="portfolio">📈 Portfolio</option>
+            </select>
+          </div>
+        </div>
+
+        {loading?<div style={{textAlign:"center",padding:"60px",color:"#9ca3af"}}>Loading mentors...</div>
+        :filtered.length===0?(
+          <div style={{textAlign:"center",padding:"80px 24px"}}>
+            <div style={{fontSize:52,marginBottom:16}}>🎓</div>
+            <h3 style={{fontFamily:"'Fraunces',serif",fontSize:22,fontWeight:800,color:"#111827",marginBottom:8}}>No mentors found</h3>
+            <p style={{fontSize:14,color:"#6b7280"}}>Try adjusting your filters, or check back soon.</p>
+          </div>
+        ):(
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(290px,1fr))",gap:18}}>
+            {filtered.map(m=>{
+              const medal = getMedal(+(m.portfolio_value||0));
+              const tier = getMentorTier(m.mentoring_sessions, m.avg_rating);
+              return (
+                <div key={m.id} style={{background:"white",borderRadius:18,border:"1.5px solid #e5e7eb",overflow:"hidden",transition:"all 0.2s",display:"flex",flexDirection:"column"}}
+                  onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-3px)";e.currentTarget.style.boxShadow="0 12px 32px rgba(0,0,0,0.08)";}}
+                  onMouseLeave={e=>{e.currentTarget.style.transform="translateY(0)";e.currentTarget.style.boxShadow="none";}}>
+                  {/* Tier color bar */}
+                  <div style={{height:4,background:tier.color}}/>
+                  <div style={{padding:"20px 22px",flex:1,display:"flex",flexDirection:"column"}}>
+                    {/* Avatar + name */}
+                    <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:12}}>
+                      <div style={{width:50,height:50,borderRadius:"50%",background:`linear-gradient(135deg,${tier.color},#059669)`,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,border:`2px solid ${tier.bg}`}}>
+                        <span style={{fontSize:20,fontWeight:800,color:"white"}}>{(m.full_name||"?")[0].toUpperCase()}</span>
                       </div>
-                      {m.title&&<p style={{fontSize:12,color:"#6b7280"}}>{m.title}</p>}
-                      <div style={{display:"flex",gap:6,marginTop:3,flexWrap:"wrap"}}>
-                        <span style={{fontSize:10,background:"#f0fdf4",color:"#059669",border:"1px solid #bbf7d0",borderRadius:100,padding:"1px 6px",fontWeight:700}}>✓ Verified</span>
-                        {m.investor_type&&<span style={{fontSize:10,background:"#f3f4f6",color:"#6b7280",borderRadius:100,padding:"1px 6px"}}>{m.investor_type}</span>}
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:2,flexWrap:"wrap"}}>
+                          <span style={{fontSize:15,fontWeight:700,color:"#111827"}}>{m.full_name}</span>
+                          <span style={{fontSize:14}}>{medal.icon}</span>
+                        </div>
+                        {m.title&&<p style={{fontSize:11,color:"#6b7280",marginBottom:3}}>{m.title}</p>}
+                        <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+                          <span style={{fontSize:10,background:tier.bg,color:tier.color,borderRadius:100,padding:"1px 7px",fontWeight:700,border:`1px solid ${tier.color}30`}}>{tier.badge} {tier.label}</span>
+                          {m.investor_type&&<span style={{fontSize:10,background:"#f3f4f6",color:"#6b7280",borderRadius:100,padding:"1px 7px"}}>{m.investor_type}</span>}
+                        </div>
                       </div>
                     </div>
-                  </div>
-                  <div style={{display:"flex",gap:14,marginBottom:14}}>
-                    {[["Portfolio",m.portfolio_public?fmtM(+(m.portfolio_value||0)):"Private"],["Deals",m.deal_count||0],["Sessions",m.mentoring_sessions||0]].map(([l,v])=>(
-                      <div key={l}><div style={{fontSize:13,fontWeight:800,fontFamily:"'DM Mono',monospace",color:"#111827"}}>{v}</div><div style={{fontSize:9,color:"#9ca3af",textTransform:"uppercase"}}>{l}</div></div>
-                    ))}
-                  </div>
-                  {m.mentoring_bio&&<p style={{fontSize:13,color:"#6b7280",lineHeight:1.6,marginBottom:14}}>{m.mentoring_bio.slice(0,120)}{m.mentoring_bio.length>120?"...":""}</p>}
-                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",paddingTop:12,borderTop:"1px solid #f3f4f6"}}>
-                    <div>
-                      {m.hourly_rate&&<><span style={{fontSize:18,fontWeight:800,fontFamily:"'DM Mono',monospace",color:"#111827"}}>${m.hourly_rate}</span><span style={{fontSize:12,color:"#9ca3af"}}>/hour</span></>}
+
+                    {/* Rating */}
+                    <div style={{marginBottom:12}}>
+                      <StarRating rating={m.avg_rating} count={m.review_count||0}/>
                     </div>
-                    {m.calendly_link?<a href={m.calendly_link} target="_blank" rel="noreferrer" style={{padding:"9px 18px",borderRadius:9,border:"none",background:"#111827",color:"white",fontSize:13,fontWeight:700,textDecoration:"none"}}>Book Session</a>:<span style={{fontSize:12,color:"#9ca3af"}}>Contact via forum</span>}
+
+                    {/* Stats */}
+                    <div style={{display:"flex",gap:16,marginBottom:12}}>
+                      {[["Sessions",m.mentoring_sessions||0],["Deals",m.deal_count||0],["Portfolio",m.portfolio_public?fmtM(+(m.portfolio_value||0)):"Private"]].map(([l,v])=>(
+                        <div key={l}><div style={{fontSize:13,fontWeight:800,fontFamily:"'DM Mono',monospace",color:"#111827"}}>{v}</div><div style={{fontSize:9,color:"#9ca3af",textTransform:"uppercase"}}>{l}</div></div>
+                      ))}
+                    </div>
+
+                    {m.mentoring_bio&&<p style={{fontSize:12,color:"#6b7280",lineHeight:1.6,marginBottom:12,flex:1}}>{m.mentoring_bio.slice(0,110)}{m.mentoring_bio.length>110?"...":""}</p>}
+
+                    {/* Specialties from investor type */}
+                    {m.investor_type&&(
+                      <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:12}}>
+                        {m.investor_type.split(",").slice(0,3).map(t=>(
+                          <span key={t} style={{fontSize:10,background:"#f3f4f6",color:"#374151",borderRadius:100,padding:"2px 8px"}}>{t.trim()}</span>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Price + book */}
+                    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",paddingTop:12,borderTop:"1px solid #f3f4f6",marginTop:"auto"}}>
+                      <div>
+                        {m.hourly_rate?(
+                          <><span style={{fontSize:20,fontWeight:800,fontFamily:"'DM Mono',monospace",color:"#111827"}}>${m.hourly_rate}</span><span style={{fontSize:12,color:"#9ca3af"}}>/hr</span></>
+                        ):<span style={{fontSize:12,color:"#9ca3af"}}>Rate TBD</span>}
+                      </div>
+                      <button onClick={()=>setBookingMentor(m)} style={{padding:"9px 18px",borderRadius:10,border:"none",background:"#111827",color:"white",fontSize:13,fontWeight:700,cursor:"pointer",transition:"all 0.15s"}}
+                        onMouseEnter={e=>e.currentTarget.style.background="#059669"}
+                        onMouseLeave={e=>e.currentTarget.style.background="#111827"}>Book Session</button>
+                    </div>
                   </div>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
+        )}
+      </>)}
+
+      {/* ── MY SESSIONS TAB ── */}
+      {activeTab==="sessions"&&(
+        <div>
+          {myBookings.length===0?(
+            <div style={{textAlign:"center",padding:"80px 24px"}}>
+              <div style={{fontSize:52,marginBottom:16}}>📅</div>
+              <h3 style={{fontFamily:"'Fraunces',serif",fontSize:20,fontWeight:800,color:"#111827",marginBottom:8}}>No sessions yet</h3>
+              <p style={{fontSize:14,color:"#6b7280",marginBottom:20}}>Book your first session with a verified mentor.</p>
+              <Btn variant="primary" onClick={()=>setActiveTab("discover")}>Browse Mentors →</Btn>
+            </div>
+          ):(
+            <div style={{display:"flex",flexDirection:"column",gap:14}}>
+              {myBookings.map(booking=>{
+                const statusColors={pending:{bg:"#fffbeb",color:"#d97706",border:"#fde68a",label:"⏳ Pending"},confirmed:{bg:"#eff6ff",color:"#2563eb",border:"#bfdbfe",label:"✅ Confirmed"},completed:{bg:"#f0fdf4",color:"#059669",border:"#bbf7d0",label:"🎓 Completed"},cancelled:{bg:"#fef2f2",color:"#dc2626",border:"#fecaca",label:"❌ Cancelled"}};
+                const sc=statusColors[booking.status]||statusColors.pending;
+                return (
+                  <div key={booking.id} style={{background:"white",borderRadius:14,border:"1.5px solid #e5e7eb",padding:"18px 22px"}}>
+                    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:10,marginBottom:12}}>
+                      <div>
+                        <div style={{fontSize:15,fontWeight:700,color:"#111827",marginBottom:2}}>Session with {booking.mentor_name}</div>
+                        <div style={{fontSize:12,color:"#9ca3af"}}>{booking.session_date} at {booking.session_time} · {booking.session_type==="single"?"Single Session":booking.session_type==="bundle3"?"3-Session Bundle":"Monthly Coaching"}</div>
+                      </div>
+                      <div style={{display:"flex",alignItems:"center",gap:10}}>
+                        <span style={{fontSize:12,fontWeight:700,color:sc.color,background:sc.bg,border:`1px solid ${sc.border}`,borderRadius:100,padding:"3px 10px"}}>{sc.label}</span>
+                        <span style={{fontSize:15,fontWeight:800,fontFamily:"'DM Mono',monospace",color:"#111827"}}>${booking.amount}</span>
+                      </div>
+                    </div>
+                    {booking.goals&&<p style={{fontSize:13,color:"#6b7280",marginBottom:10}}><strong>Goals:</strong> {booking.goals}</p>}
+                    {booking.status==="completed"&&!booking.rated&&(
+                      <button onClick={()=>setReviewBooking(booking)} style={{padding:"7px 16px",borderRadius:8,border:"1.5px solid #fde68a",background:"#fffbeb",color:"#d97706",fontSize:12,fontWeight:700,cursor:"pointer"}}>⭐ Leave Review</button>
+                    )}
+                    {booking.rated&&<div style={{fontSize:12,color:"#059669",fontWeight:600}}>✅ Review submitted · Thank you!</div>}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
     </div>
   );
 }
+
 
 // ─── Demo Data ─────────────────────────────────────────────────────────────────
 const DEMO={
@@ -1765,9 +3309,9 @@ function AnalyzerApp({user,profile,onGoHome,onGoProfile,onSignOut}) {
         </div>
       )}
 
-      {view==="forum"&&<ForumView user={user} profile={profile}/>}
+      {view==="forum"&&<ForumView user={user} profile={profile} savedDeals={savedDeals||[]}/>}
       {view==="leaderboard"&&<LeaderboardView user={user} profile={profile} onGoProfile={onGoProfile}/>}
-      {view==="mentors"&&<MentorDirectory/>}
+      {view==="mentors"&&<MentorDirectory user={user} profile={profile}/>}
     </div>
   );
 }
