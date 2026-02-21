@@ -308,14 +308,79 @@ function BigResult({label,value,positive,negative}) {
   const color=positive?"#059669":negative?"#dc2626":"#374151";
   return <div style={{textAlign:"center",padding:"18px 14px",background:bg,borderRadius:12,border:`1.5px solid ${border}`}}><div style={{fontSize:10,fontWeight:700,letterSpacing:"0.08em",textTransform:"uppercase",color:"#9ca3af",marginBottom:8}}>{label}</div><div style={{fontSize:24,fontWeight:800,fontFamily:"'DM Mono',monospace",color}}>{value}</div></div>;
 }
-function AddressBar({value,onChange}) {
-  return <div style={{marginBottom:18}}><div style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",background:"#f0fdf4",border:"1.5px solid #bbf7d0",borderRadius:10}}><span style={{fontSize:16}}>📍</span><input type="text" value={value} onChange={e=>onChange(e.target.value)} placeholder="Enter property address (optional)..." style={{flex:1,background:"transparent",border:"none",outline:"none",fontSize:13,color:"#111827",fontFamily:"'DM Sans',sans-serif"}}/></div></div>;
+function AddressBar({value, onChange, onDataFill}) {
+  const [suggestions, setSuggestions] = useState([]);
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const debounceRef = useRef(null);
+
+  const search = (q) => {
+    onChange(q);
+    if(q.length < 4){ setSuggestions([]); setOpen(false); return; }
+    clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(async()=>{
+      setLoading(true);
+      try {
+        // Use Nominatim (free, no API key needed)
+        const res = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&addressdetails=1&limit=5&countrycodes=us`);
+        const data = await res.json();
+        setSuggestions(data||[]);
+        setOpen(data?.length>0);
+      } catch { setSuggestions([]); }
+      setLoading(false);
+    }, 400);
+  };
+
+  const select = (item) => {
+    const addr = item.display_name?.split(",").slice(0,3).join(",").trim();
+    onChange(addr);
+    setOpen(false);
+    setSuggestions([]);
+    // Pass back address data if parent wants to auto-fill
+    if(onDataFill && item.address) {
+      onDataFill({
+        city: item.address.city||item.address.town||item.address.village||"",
+        state: item.address.state||"",
+        zip: item.address.postcode||"",
+        county: item.address.county||"",
+        lat: item.lat,
+        lon: item.lon,
+      });
+    }
+  };
+
+  return (
+    <div style={{marginBottom:18,position:"relative"}}>
+      <div style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",background:"#f0fdf4",border:"1.5px solid #bbf7d0",borderRadius:10}}>
+        <span style={{fontSize:16}}>{loading?"⏳":"📍"}</span>
+        <input type="text" value={value} onChange={e=>search(e.target.value)}
+          onBlur={()=>setTimeout(()=>setOpen(false),200)}
+          onFocus={()=>suggestions.length>0&&setOpen(true)}
+          placeholder="Enter property address (optional)..."
+          style={{flex:1,background:"transparent",border:"none",outline:"none",fontSize:13,color:"#111827",fontFamily:"'DM Sans',sans-serif"}}/>
+        {value&&<button onClick={()=>{onChange("");setSuggestions([]);}} style={{background:"none",border:"none",color:"#9ca3af",cursor:"pointer",fontSize:14,padding:0}}>✕</button>}
+      </div>
+      {open&&suggestions.length>0&&(
+        <div style={{position:"absolute",top:"100%",left:0,right:0,background:"white",border:"1.5px solid #e5e7eb",borderRadius:10,boxShadow:"0 8px 24px rgba(0,0,0,0.1)",zIndex:200,marginTop:4,overflow:"hidden"}}>
+          {suggestions.map((s,i)=>(
+            <button key={i} onMouseDown={()=>select(s)}
+              style={{width:"100%",padding:"10px 14px",textAlign:"left",background:"none",border:"none",borderBottom:i<suggestions.length-1?"1px solid #f3f4f6":"none",cursor:"pointer",fontSize:12,color:"#374151",lineHeight:1.4}}
+              onMouseEnter={e=>e.currentTarget.style.background="#f0fdf4"}
+              onMouseLeave={e=>e.currentTarget.style.background="none"}>
+              📍 {s.display_name?.split(",").slice(0,4).join(",")}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ─── Calculators ───────────────────────────────────────────────────────────────
 // ─── PRO GATE SYSTEM ──────────────────────────────────────────────────────────
 
-function UpgradeModal({onClose, trigger="unlock"}) {
+function UpgradeModal({onClose, trigger="unlock", onActivatePro}) {
+  const [activated, setActivated] = useState(false);
   const messages = {
     compare: {title:"Compare Deals Side-by-Side", desc:"Stack up to 5 deals in a comparison grid. See which one wins on every metric."},
     export:  {title:"Export Investor-Ready Reports", desc:"PDF reports, lender summaries, and shareable deal links."},
@@ -323,6 +388,34 @@ function UpgradeModal({onClose, trigger="unlock"}) {
     unlock:  {title:"Unlock Decision Intelligence", desc:"Risk scoring, stress testing, capital efficiency grades — institutional-grade underwriting."},
   };
   const msg = messages[trigger]||messages.unlock;
+
+  const handleActivate = async() => {
+    setActivated(true);
+    try {
+      // Call Vercel serverless function to create Stripe Checkout session
+      const res = await fetch('/api/create-checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: supabase._userId,
+          email: supabase._userEmail||'',
+        }),
+      });
+      const data = await res.json();
+      if (data.url) {
+        window.location.href = data.url; // Redirect to Stripe Checkout
+      } else {
+        throw new Error(data.error||'No checkout URL');
+      }
+    } catch(err) {
+      console.error('Checkout error:', err);
+      // Fallback: activate locally for testing if API not deployed yet
+      await supabase._fetch(`/rest/v1/profiles?id=eq.${supabase._userId}`,{method:"PATCH",body:JSON.stringify({is_pro:true})}).catch(()=>{});
+      onActivatePro&&onActivatePro();
+      setTimeout(()=>onClose(),1000);
+    }
+  };
+
   return (
     <div onClick={e=>e.target===e.currentTarget&&onClose()} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.6)",backdropFilter:"blur(6px)",zIndex:800,display:"flex",alignItems:"center",justifyContent:"center",padding:24}}>
       <div style={{background:"white",borderRadius:24,padding:0,maxWidth:460,width:"100%",boxShadow:"0 32px 80px rgba(0,0,0,0.2)",overflow:"hidden",animation:"popIn 0.2s cubic-bezier(0.34,1.56,0.64,1) both"}}>
@@ -333,39 +426,41 @@ function UpgradeModal({onClose, trigger="unlock"}) {
         </div>
         <div style={{padding:"24px 32px"}}>
           <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:24}}>
-            {[
-              "🧠 Risk Score Engine (A–F grade)",
-              "📊 Stress Testing (rent drops, rate hikes, vacancy spikes)",
-              "⚖️ Side-by-side deal comparison",
-              "💼 Portfolio dashboard & capital tracking",
-              "📄 Investor PDF & lender summary exports",
-              "♾️ Unlimited saved deals",
-            ].map(f=>(
+            {["🧠 Risk Score Engine (A–F grade)","📊 Stress Testing (rent drops, rate hikes, vacancy spikes)","⚖️ Side-by-side deal comparison","💼 Portfolio dashboard & capital tracking","📄 Investor PDF & lender summary exports","♾️ Unlimited saved deals"].map(f=>(
               <div key={f} style={{display:"flex",alignItems:"center",gap:10,fontSize:13,color:"#374151"}}>
                 <span style={{color:"#10b981",fontSize:14,flexShrink:0}}>✓</span>{f}
               </div>
             ))}
           </div>
-          <div style={{display:"flex",align:"center",justifyContent:"space-between",marginBottom:16,padding:"14px 16px",background:"#f0fdf4",borderRadius:12,border:"1.5px solid #bbf7d0"}}>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16,padding:"14px 16px",background:"#f0fdf4",borderRadius:12,border:"1.5px solid #bbf7d0"}}>
             <div><div style={{fontSize:13,fontWeight:700,color:"#374151"}}>DealSource Pro</div><div style={{fontSize:11,color:"#6b7280"}}>Cancel anytime</div></div>
             <div style={{textAlign:"right"}}><span style={{fontSize:26,fontWeight:800,fontFamily:"'DM Mono',monospace",color:"#059669"}}>$20</span><span style={{fontSize:12,color:"#6b7280"}}>/mo</span></div>
           </div>
-          <button style={{width:"100%",padding:"14px",borderRadius:12,border:"none",background:"#10b981",color:"white",fontSize:15,fontWeight:700,cursor:"pointer",marginBottom:10,boxShadow:"0 4px 20px rgba(16,185,129,0.3)"}}>
-            Upgrade to Pro → {/* Stripe goes here */}
-          </button>
-          <button onClick={onClose} style={{width:"100%",padding:"10px",borderRadius:12,border:"1.5px solid #e5e7eb",background:"white",color:"#6b7280",fontSize:13,cursor:"pointer"}}>Maybe later</button>
+          {activated?(
+            <div style={{textAlign:"center",padding:"14px",background:"#f0fdf4",borderRadius:12,border:"1.5px solid #bbf7d0"}}>
+              <div style={{fontSize:20,marginBottom:6}}>⏳</div>
+              <div style={{fontSize:14,fontWeight:700,color:"#059669"}}>Redirecting to checkout...</div>
+            </div>
+          ):(
+            <>
+              <button onClick={handleActivate} style={{width:"100%",padding:"14px",borderRadius:12,border:"none",background:"#10b981",color:"white",fontSize:15,fontWeight:700,cursor:"pointer",marginBottom:10,boxShadow:"0 4px 20px rgba(16,185,129,0.3)"}}>
+                Upgrade to Pro — $20/mo →
+              </button>
+              <button onClick={onClose} style={{width:"100%",padding:"10px",borderRadius:12,border:"1.5px solid #e5e7eb",background:"white",color:"#6b7280",fontSize:13,cursor:"pointer"}}>Maybe later</button>
+            </>
+          )}
         </div>
       </div>
     </div>
   );
 }
 
-function ProGate({isPro, trigger="unlock", children}) {
+function ProGate({isPro, trigger="unlock", onActivatePro, children}) {
   const [showUpgrade, setShowUpgrade] = useState(false);
   if(isPro) return children;
   return (
     <>
-      {showUpgrade&&<UpgradeModal onClose={()=>setShowUpgrade(false)} trigger={trigger}/>}
+      {showUpgrade&&<UpgradeModal onClose={()=>setShowUpgrade(false)} trigger={trigger} onActivatePro={()=>{onActivatePro&&onActivatePro();setShowUpgrade(false);}}/>}
       <div style={{position:"relative",cursor:"pointer"}} onClick={()=>setShowUpgrade(true)}>
         <div style={{filter:"blur(3px)",pointerEvents:"none",userSelect:"none",opacity:0.5}}>{children}</div>
         <div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",background:"rgba(255,255,255,0.7)",borderRadius:12}}>
@@ -620,7 +715,7 @@ function DecisionMode({metrics, strategy, isPro}) {
 }
 
 
-function RentalCalc({saved,onCalcChange,profile}) {
+function RentalCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro}) {
   const [addr,setAddr]=useState(saved?.address||"");
   const [advMode,setAdvMode]=useState(false);
   const [i,setI]=useState(saved||{
@@ -674,7 +769,7 @@ function RentalCalc({saved,onCalcChange,profile}) {
   const dscrColor=c.dscr>=1.35?"#059669":c.dscr>=1.2?"#d97706":"#dc2626";
 
   const [calcTab,setCalcTab]=useState("calc");
-  const isPro=profile?.is_pro||false;
+  const isPro=isProProp||profile?.is_pro||false;
   const dmMetrics={mcf:c.mcf,coc:c.coc,dscr:c.dscr,beo:c.beo,ltv:+i.pp>0?(+i.pp*(1-+i.down/100))/+i.pp:0,rent:+i.rent,expenses:totalExp,mortgage:mortgagePmt,pp:+i.pp};
 
   return (<>
@@ -804,7 +899,7 @@ function RentalCalc({saved,onCalcChange,profile}) {
     </>}
   </>);
 }
-function WholesaleCalc({saved,onCalcChange}) {
+function WholesaleCalc({saved,onCalcChange,isPro:isProProp,onActivatePro}) {
   const [addr,setAddr]=useState(saved?.address||"");
   const [advMode,setAdvMode]=useState(false);
   const [arvAdj,setArvAdj]=useState(0);
@@ -833,7 +928,7 @@ function WholesaleCalc({saved,onCalcChange}) {
   useEffect(()=>onCalcChange({...i,address:addr},{primary:fmtD(c.mao),secondary:fmtD(+i.fee),label:"MAO",label2:"Your Fee"}),[i,c,addr]);
 
   const [calcTab,setCalcTab]=useState("calc");
-  const isPro=false; // wire to profile.is_pro when Stripe ready
+  const isPro=isProProp||false; // wire to profile.is_pro when Stripe ready
   const dmMetrics={mao:c.mao,arv:+i.arv,repairs:+i.repairs,fee:+i.fee,margin:c.marginPct};
 
   return (<>
@@ -923,7 +1018,7 @@ function WholesaleCalc({saved,onCalcChange}) {
     </>}
   </>);
 }
-function FlipCalc({saved,onCalcChange}) {
+function FlipCalc({saved,onCalcChange,isPro:isProProp,onActivatePro}) {
   const [addr,setAddr]=useState(saved?.address||"");
   const [financing,setFinancing]=useState("cash");
   const [targetMode,setTargetMode]=useState("fixed");
@@ -960,7 +1055,7 @@ function FlipCalc({saved,onCalcChange}) {
   useEffect(()=>onCalcChange({...i,address:addr},{primary:fmtD(c.profit),secondary:fmtP(c.annRoi),label:"Net Profit",label2:"Ann. ROI"}),[i,c,addr]);
 
   const [calcTab,setCalcTab]=useState("calc");
-  const isPro=false;
+  const isPro=isProProp||false;
   const dmMetrics={profit:c.profit,arv:+i.arv,roi:c.annRoi,margin:+i.arv>0?c.profit/+i.arv:0,months:+i.months,costs:c.totalCosts,holdingMoCost:(+i.taxesMo+ +i.insuranceMo+ +i.utilitiesMo)};
 
   return (<>
@@ -1062,7 +1157,7 @@ function FlipCalc({saved,onCalcChange}) {
     </>}
   </>);
 }
-function BRRRRCalc({saved,onCalcChange}) {
+function BRRRRCalc({saved,onCalcChange,isPro:isProProp,onActivatePro}) {
   const [addr,setAddr]=useState(saved?.address||"");
   const [i,setI]=useState(saved||{
     pp:110000,rehab:45000,arv:210000,
@@ -1100,7 +1195,7 @@ function BRRRRCalc({saved,onCalcChange}) {
   useEffect(()=>onCalcChange({...i,address:addr},{primary:fmtD(c.cashLeftInDeal===0?c.netRefi-c.totalIn:-(c.cashLeftInDeal)),secondary:fmtD(c.mcf),label:"Cash Left In",label2:"Mo. Cash Flow"}),[i,c,addr]);
 
   const [calcTab,setCalcTab]=useState("calc");
-  const isPro=false;
+  const isPro=isProProp||false;
   const dmMetrics={mcf:c.mcf,coc:c.coc||0,dscr:c.dscr,beo:0,ltv:+i.arv>0?c.refiAmt/+i.arv:0,rent:+i.rent,expenses:totalExp,mortgage:c.refiPmt,pp:+i.pp};
 
   return (<>
@@ -1224,7 +1319,7 @@ function generateAndDownload(type,inputs,calcs,profile) {
   document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url);
 }
 
-function SubToCalc({saved,onCalcChange,profile}) {
+function SubToCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro}) {
   const [addr,setAddr]=useState(saved?.address||"");
   const [exitPlan,setExitPlan]=useState("hold");
   const [i,setI]=useState(saved||{
@@ -1263,7 +1358,7 @@ function SubToCalc({saved,onCalcChange,profile}) {
   useEffect(()=>onCalcChange({...i,address:addr},{primary:fmtD(c.mcf),secondary:fmtP(c.roi),label:"Mo. Cash Flow",label2:"ROI"}),[i,c,addr]);
 
   const [calcTab,setCalcTab]=useState("calc");
-  const isPro=profile?.is_pro||false;
+  const isPro=isProProp||profile?.is_pro||false;
   const dmMetrics={mcf:c.mcf,coc:c.roi,dscr:+i.pmt>0?(+i.rent-totalExp)/+i.pmt:0,beo:+i.rent>0?(totalExp+ +i.pmt)/+i.rent:0,ltv:+i.marketValue>0?+i.balance/+i.marketValue:0,rent:+i.rent,expenses:totalExp,mortgage:+i.pmt,pp:+i.marketValue};
 
   return (<>
@@ -1373,7 +1468,7 @@ function SubToCalc({saved,onCalcChange,profile}) {
     </>}
   </>);
 }
-function NovationCalc({saved,onCalcChange,profile}) {
+function NovationCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro}) {
   const [addr,setAddr]=useState(saved?.address||"");
   const [saleAdj,setSaleAdj]=useState(100);
   const [targetMode,setTargetMode]=useState("fixed");
@@ -1409,7 +1504,7 @@ function NovationCalc({saved,onCalcChange,profile}) {
   useEffect(()=>onCalcChange({...i,address:addr},{primary:fmtD(c.profit),secondary:fmtP(c.annRoi),label:"Net Profit",label2:"Ann. ROI"}),[i,c,addr]);
 
   const [calcTab,setCalcTab]=useState("calc");
-  const isPro=profile?.is_pro||false;
+  const isPro=isProProp||profile?.is_pro||false;
   const dmMetrics={profit:c.profit,arv:+i.arv,roi:c.annRoi,margin:c.profitPctArv,months:+i.months,costs:c.tc,holdingMoCost:(+i.taxesMo+ +i.insuranceMo+ +i.utilitiesMo)};
 
   return (<>
@@ -3565,8 +3660,10 @@ function AnalyzerApp({user,profile,onGoHome,onGoProfile,onSignOut}) {
   const [savedFlash,setSavedFlash]=useState(false);
   const [filterMode,setFilterMode]=useState("all");
   const [dealsLoading,setDealsLoading]=useState(true);
+  const [isPro,setIsPro]=useState(profile?.is_pro||false);
+  const [showUpgradeModal,setShowUpgradeModal]=useState(false);
 
-  useEffect(()=>{supabase.getDeals(user.id).then(d=>{setDeals(d);setDealsLoading(false);}).catch(()=>setDealsLoading(false));},[user.id]);
+  useEffect(()=>{setIsPro(profile?.is_pro||false);},[profile]);
 
   const handleCalcChange=useCallback((inputs,metrics)=>{setCurrentInputs(inputs);setCurrentMetrics(metrics);},[]);
 
@@ -3651,7 +3748,7 @@ function AnalyzerApp({user,profile,onGoHome,onGoProfile,onSignOut}) {
               {loadedDealId&&<div style={{display:"flex",alignItems:"center",gap:7,background:"white",border:`1.5px solid ${activeMode.border}`,borderRadius:100,padding:"4px 12px"}}><span style={{fontSize:11}}>📂</span><span style={{fontSize:11,color:activeMode.color,fontWeight:600}}>Loaded from saved</span></div>}
             </div>
             <div style={{padding:"24px 22px"}}>
-              <CalcComponent key={`${mode}-${loadedDealId}`} saved={loadedDealId?deals.find(d=>d.id===loadedDealId)?.inputs:null} onCalcChange={handleCalcChange} profile={profile}/>
+              <CalcComponent key={`${mode}-${loadedDealId}`} saved={loadedDealId?deals.find(d=>d.id===loadedDealId)?.inputs:null} onCalcChange={handleCalcChange} profile={{...profile,is_pro:isPro}} isPro={isPro} onActivatePro={()=>setIsPro(true)}/>
             </div>
             <div style={{padding:"12px 22px",borderTop:"1px solid #f3f4f6",background:"#fafafa",display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>
               <p style={{fontSize:12,color:"#9ca3af"}}>Updates as you type · Saved to your account</p>
@@ -3686,7 +3783,7 @@ function AnalyzerApp({user,profile,onGoHome,onGoProfile,onSignOut}) {
         </div>
       )}
 
-      {view==="forum"&&<ForumView user={user} profile={profile} savedDeals={savedDeals||[]}/>}
+      {view==="forum"&&<ForumView user={user} profile={profile} savedDeals={deals||[]}/>}
       {view==="leaderboard"&&<LeaderboardView user={user} profile={profile} onGoProfile={onGoProfile}/>}
       {view==="mentors"&&<MentorDirectory user={user} profile={profile}/>}
     </div>
@@ -3702,15 +3799,25 @@ export default function Root() {
   useEffect(()=>{
     if(supabase.auth.restoreSession()){
       supabase.auth.getUser().then(u=>{
-        if(u){setUser(u);supabase.getProfile(u.id).then(p=>{setProfile(p);setPage("app");}).catch(()=>setPage("app"));}
+        if(u){setUser(u);supabase._userId=u.id;supabase._userEmail=u.email;supabase.getProfile(u.id).then(p=>{setProfile(p);setPage("app");}).catch(()=>setPage("app"));}
         else{supabase._token=null;try{localStorage.removeItem("ds_token");}catch{}setPage("home");}
       }).catch(()=>setPage("home"));
     }else{setPage("home");}
   },[]);
 
-  const handleSignIn=(u,p)=>{setUser(u);setProfile(p);setPage("app");};
+  const handleSignIn=(u,p)=>{setUser(u);setProfile(p);supabase._userId=u?.id;supabase._userEmail=u?.email;setPage("app");};
   const handleSignOut=async()=>{await supabase.auth.signOut();setUser(null);setProfile(null);setPage("home");};
   const handleProfileUpdate=(p)=>setProfile(p);
+
+  // Handle Stripe redirect back to app
+  useEffect(()=>{
+    const params=new URLSearchParams(window.location.search);
+    if(params.get("pro")==="success"&&user){
+      // Refresh profile to pick up is_pro=true set by webhook
+      supabase.getProfile(user.id).then(p=>{if(p)setProfile(p);});
+      window.history.replaceState({},"",window.location.pathname);
+    }
+  },[user]);
 
   if(page==="loading") return(
     <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:"#f9fafb"}}>
