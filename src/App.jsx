@@ -313,6 +313,313 @@ function AddressBar({value,onChange}) {
 }
 
 // ─── Calculators ───────────────────────────────────────────────────────────────
+// ─── PRO GATE SYSTEM ──────────────────────────────────────────────────────────
+
+function UpgradeModal({onClose, trigger="unlock"}) {
+  const messages = {
+    compare: {title:"Compare Deals Side-by-Side", desc:"Stack up to 5 deals in a comparison grid. See which one wins on every metric."},
+    export:  {title:"Export Investor-Ready Reports", desc:"PDF reports, lender summaries, and shareable deal links."},
+    save:    {title:"Save Unlimited Deals", desc:"Free plan is limited to 1 saved deal. Go Pro to save, organize, and revisit unlimited deals."},
+    unlock:  {title:"Unlock Decision Intelligence", desc:"Risk scoring, stress testing, capital efficiency grades — institutional-grade underwriting."},
+  };
+  const msg = messages[trigger]||messages.unlock;
+  return (
+    <div onClick={e=>e.target===e.currentTarget&&onClose()} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.6)",backdropFilter:"blur(6px)",zIndex:800,display:"flex",alignItems:"center",justifyContent:"center",padding:24}}>
+      <div style={{background:"white",borderRadius:24,padding:0,maxWidth:460,width:"100%",boxShadow:"0 32px 80px rgba(0,0,0,0.2)",overflow:"hidden",animation:"popIn 0.2s cubic-bezier(0.34,1.56,0.64,1) both"}}>
+        <div style={{background:"linear-gradient(135deg,#064e3b,#065f46)",padding:"28px 32px"}}>
+          <div style={{fontSize:36,marginBottom:12}}>🧠</div>
+          <h2 style={{fontFamily:"'Fraunces',serif",fontSize:22,fontWeight:800,color:"white",marginBottom:6}}>{msg.title}</h2>
+          <p style={{fontSize:13,color:"rgba(255,255,255,0.65)",lineHeight:1.6}}>{msg.desc}</p>
+        </div>
+        <div style={{padding:"24px 32px"}}>
+          <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:24}}>
+            {[
+              "🧠 Risk Score Engine (A–F grade)",
+              "📊 Stress Testing (rent drops, rate hikes, vacancy spikes)",
+              "⚖️ Side-by-side deal comparison",
+              "💼 Portfolio dashboard & capital tracking",
+              "📄 Investor PDF & lender summary exports",
+              "♾️ Unlimited saved deals",
+            ].map(f=>(
+              <div key={f} style={{display:"flex",alignItems:"center",gap:10,fontSize:13,color:"#374151"}}>
+                <span style={{color:"#10b981",fontSize:14,flexShrink:0}}>✓</span>{f}
+              </div>
+            ))}
+          </div>
+          <div style={{display:"flex",align:"center",justifyContent:"space-between",marginBottom:16,padding:"14px 16px",background:"#f0fdf4",borderRadius:12,border:"1.5px solid #bbf7d0"}}>
+            <div><div style={{fontSize:13,fontWeight:700,color:"#374151"}}>DealSource Pro</div><div style={{fontSize:11,color:"#6b7280"}}>Cancel anytime</div></div>
+            <div style={{textAlign:"right"}}><span style={{fontSize:26,fontWeight:800,fontFamily:"'DM Mono',monospace",color:"#059669"}}>$20</span><span style={{fontSize:12,color:"#6b7280"}}>/mo</span></div>
+          </div>
+          <button style={{width:"100%",padding:"14px",borderRadius:12,border:"none",background:"#10b981",color:"white",fontSize:15,fontWeight:700,cursor:"pointer",marginBottom:10,boxShadow:"0 4px 20px rgba(16,185,129,0.3)"}}>
+            Upgrade to Pro → {/* Stripe goes here */}
+          </button>
+          <button onClick={onClose} style={{width:"100%",padding:"10px",borderRadius:12,border:"1.5px solid #e5e7eb",background:"white",color:"#6b7280",fontSize:13,cursor:"pointer"}}>Maybe later</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ProGate({isPro, trigger="unlock", children}) {
+  const [showUpgrade, setShowUpgrade] = useState(false);
+  if(isPro) return children;
+  return (
+    <>
+      {showUpgrade&&<UpgradeModal onClose={()=>setShowUpgrade(false)} trigger={trigger}/>}
+      <div style={{position:"relative",cursor:"pointer"}} onClick={()=>setShowUpgrade(true)}>
+        <div style={{filter:"blur(3px)",pointerEvents:"none",userSelect:"none",opacity:0.5}}>{children}</div>
+        <div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",background:"rgba(255,255,255,0.7)",borderRadius:12}}>
+          <div style={{background:"linear-gradient(135deg,#064e3b,#065f46)",borderRadius:14,padding:"14px 22px",textAlign:"center",boxShadow:"0 8px 32px rgba(0,0,0,0.15)"}}>
+            <div style={{fontSize:18,marginBottom:6}}>🔒</div>
+            <div style={{fontSize:13,fontWeight:700,color:"white",marginBottom:3}}>Pro Feature</div>
+            <div style={{fontSize:11,color:"rgba(255,255,255,0.7)",marginBottom:10}}>Unlock Decision Intelligence</div>
+            <div style={{fontSize:12,fontWeight:700,color:"#6ee7b7"}}>$20/mo → Upgrade</div>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+// ─── RISK SCORE ENGINE ─────────────────────────────────────────────────────────
+function calcRiskScore(metrics, strategy) {
+  let score = 0;
+  const flags = [];
+  const strengths = [];
+
+  if(strategy==="rental"||strategy==="brrrr"||strategy==="subto") {
+    const {mcf=0, coc=0, dscr=0, ltv=0, beo=0} = metrics;
+    // Margin of safety (MCF)
+    if(mcf>=500){score+=20;strengths.push("Strong cash flow buffer");}
+    else if(mcf>=200){score+=12;}
+    else if(mcf>=0){score+=5;flags.push("Thin cash flow margin");}
+    else{score+=0;flags.push("Negative cash flow — high risk");}
+    // CoC
+    if(coc>=0.12){score+=20;strengths.push("Excellent CoC return");}
+    else if(coc>=0.08){score+=14;}
+    else if(coc>=0.04){score+=7;flags.push("Below-average CoC");}
+    else{flags.push("Poor return on capital");}
+    // DSCR
+    if(dscr>=1.5){score+=20;strengths.push("Debt well-covered");}
+    else if(dscr>=1.35){score+=15;}
+    else if(dscr>=1.2){score+=8;flags.push("DSCR near lender minimum");}
+    else{flags.push("DSCR below 1.2 — lender risk");}
+    // LTV / Break-even
+    if(beo<=0.75){score+=20;strengths.push("Low break-even occupancy");}
+    else if(beo<=0.85){score+=12;}
+    else{score+=4;flags.push("High break-even occupancy");}
+    // Capital efficiency
+    if(ltv>0&&ltv<=0.7){score+=20;strengths.push("Conservative leverage");}
+    else if(ltv<=0.8){score+=12;}
+    else{score+=4;flags.push("High leverage exposure");}
+  }
+
+  if(strategy==="wholesale") {
+    const {mao=0, arv=0, repairs=0, fee=0} = metrics;
+    const spread = arv - mao;
+    const margin = arv>0?spread/arv:0;
+    const repairBuffer = arv>0?repairs/arv:0;
+    if(margin>=0.35){score+=25;strengths.push("Strong deal spread");}
+    else if(margin>=0.25){score+=15;}
+    else if(margin>=0.15){score+=8;flags.push("Thin spread — risky");}
+    else{flags.push("Spread too thin");}
+    if(repairBuffer<=0.12){score+=25;strengths.push("Low repair ratio");}
+    else if(repairBuffer<=0.2){score+=15;}
+    else{score+=5;flags.push("High repair-to-ARV ratio");}
+    if(fee>=8000){score+=25;strengths.push("Solid assignment fee");}
+    else if(fee>=4000){score+=15;}
+    else{score+=5;flags.push("Low assignment fee");}
+    score+=25; // base for wholesale simplicity
+  }
+
+  if(strategy==="flip"||strategy==="novation") {
+    const {profit=0, arv=0, roi=0, months=6} = metrics;
+    const margin = arv>0?profit/arv:0;
+    if(margin>=0.2){score+=25;strengths.push("Strong profit margin");}
+    else if(margin>=0.15){score+=18;}
+    else if(margin>=0.1){score+=10;flags.push("Thin margin");}
+    else{flags.push("Margin below 10% — high risk");}
+    if(roi>=0.3){score+=25;strengths.push("Excellent annualized ROI");}
+    else if(roi>=0.2){score+=18;}
+    else if(roi>=0.1){score+=10;}
+    else{flags.push("Low ROI for risk taken");}
+    if(months<=4){score+=25;strengths.push("Short hold = lower risk");}
+    else if(months<=6){score+=18;}
+    else if(months<=9){score+=10;flags.push("Extended hold increases risk");}
+    else{flags.push("Long hold — high carrying cost risk");}
+    score+=25; // base
+  }
+
+  score = Math.min(100, Math.max(0, Math.round(score)));
+  let grade, gradeColor, verdict, verdictBg, verdictColor;
+  if(score>=85){grade="A";gradeColor="#059669";verdict="Strong Buy";verdictBg="#f0fdf4";verdictColor="#059669";}
+  else if(score>=70){grade="B";gradeColor="#2563eb";verdict="Proceed";verdictBg="#eff6ff";verdictColor="#2563eb";}
+  else if(score>=55){grade="C";gradeColor="#d97706";verdict="Caution";verdictBg="#fffbeb";verdictColor="#d97706";}
+  else if(score>=35){grade="D";gradeColor="#ea580c";verdict="High Risk";verdictBg="#fff7ed";verdictColor="#ea580c";}
+  else{grade="F";gradeColor="#dc2626";verdict="Avoid";verdictBg="#fef2f2";verdictColor="#dc2626";}
+
+  return{score,grade,gradeColor,verdict,verdictBg,verdictColor,flags,strengths};
+}
+
+// ─── STRESS TEST ENGINE ────────────────────────────────────────────────────────
+function StressTest({metrics, strategy, isPro}) {
+  const scenarios = useMemo(()=>{
+    if(strategy==="rental"||strategy==="brrrr"||strategy==="subto") {
+      const {rent=0, expenses=0, mortgage=0, pp=0} = metrics;
+      const base = rent-expenses-mortgage;
+      return [
+        {label:"Base Case",        mcf:base,            change:"",        color:"#374151"},
+        {label:"Rent −5%",         mcf:(rent*0.95)-expenses-mortgage, change:"-5% rent",  color:"#d97706"},
+        {label:"Rent −10%",        mcf:(rent*0.9)-expenses-mortgage,  change:"-10% rent", color:"#dc2626"},
+        {label:"Rate +1%",         mcf:base-(metrics.pp||0)*0.01/12,  change:"+1% rate",  color:"#d97706"},
+        {label:"Rate +2%",         mcf:base-(metrics.pp||0)*0.02/12,  change:"+2% rate",  color:"#dc2626"},
+        {label:"Vacancy 15%",      mcf:(rent*0.85)-expenses-mortgage, change:"15% vacancy",color:"#dc2626"},
+        {label:"Expenses +15%",    mcf:rent-(expenses*1.15)-mortgage, change:"+15% exp",  color:"#d97706"},
+        {label:"Worst Case",       mcf:(rent*0.85)-(expenses*1.15)-mortgage-(metrics.pp||0)*0.01/12, change:"Combined", color:"#dc2626"},
+      ];
+    }
+    if(strategy==="flip"||strategy==="novation") {
+      const {profit=0, arv=0, costs=0} = metrics;
+      return [
+        {label:"Base Case",   profit,              arv,    color:"#374151"},
+        {label:"ARV −3%",     profit:profit-(arv*0.03), arv:arv*0.97, color:"#d97706"},
+        {label:"ARV −5%",     profit:profit-(arv*0.05), arv:arv*0.95, color:"#dc2626"},
+        {label:"ARV −10%",    profit:profit-(arv*0.1),  arv:arv*0.9,  color:"#dc2626"},
+        {label:"Costs +10%",  profit:profit-(costs*0.1), arv,         color:"#d97706"},
+        {label:"Hold +3mo",   profit:profit-(metrics.holdingMoCost||0)*3, arv, color:"#d97706"},
+        {label:"Worst Case",  profit:profit-(arv*0.05)-(costs*0.1)-(metrics.holdingMoCost||0)*3, arv:arv*0.95, color:"#dc2626"},
+      ];
+    }
+    if(strategy==="wholesale") {
+      const {mao=0, arv=0, fee=0} = metrics;
+      return [
+        {label:"Base Case", fee, mao, arv, color:"#374151"},
+        {label:"ARV −3%",   fee:fee-(arv*0.03), mao:mao-(arv*0.03), arv:arv*0.97, color:"#d97706"},
+        {label:"ARV −5%",   fee:fee-(arv*0.05), mao:mao-(arv*0.05), arv:arv*0.95, color:"#dc2626"},
+        {label:"Repairs +20%", fee:fee-(metrics.repairs||0)*0.2, mao, arv, color:"#d97706"},
+        {label:"Worst Case", fee:fee-(arv*0.05)-(metrics.repairs||0)*0.2, mao:mao-(arv*0.05), arv:arv*0.95, color:"#dc2626"},
+      ];
+    }
+    return [];
+  },[metrics,strategy]);
+
+  const isIncome = strategy==="rental"||strategy==="brrrr"||strategy==="subto";
+  const isFlip = strategy==="flip"||strategy==="novation";
+
+  return (
+    <ProGate isPro={isPro} trigger="unlock">
+      <div style={{background:"#f9fafb",borderRadius:12,overflow:"hidden",border:"1.5px solid #e5e7eb"}}>
+        <div style={{padding:"12px 16px",borderBottom:"1px solid #e5e7eb",background:"white",display:"flex",alignItems:"center",gap:8}}>
+          <span style={{fontSize:14}}>📊</span>
+          <span style={{fontSize:12,fontWeight:700,color:"#374151",textTransform:"uppercase",letterSpacing:"0.06em"}}>Stress Test Engine</span>
+        </div>
+        <div style={{padding:"14px 16px"}}>
+          {scenarios.map((s,idx)=>{
+            const val = isIncome?s.mcf:isFlip?s.profit:s.fee;
+            const isBase = idx===0;
+            return (
+              <div key={idx} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 0",borderBottom:idx<scenarios.length-1?"1px solid #f3f4f6":"none"}}>
+                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                  {!isBase&&<span style={{fontSize:11,background:s.color==="#dc2626"?"#fef2f2":"#fffbeb",color:s.color,padding:"1px 7px",borderRadius:100,fontWeight:600,border:`1px solid ${s.color}20`}}>{s.change}</span>}
+                  <span style={{fontSize:12,color:isBase?"#374151":"#6b7280",fontWeight:isBase?700:400}}>{s.label}</span>
+                </div>
+                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                  {!isBase&&val!==undefined&&(()=>{
+                    const base = isIncome?scenarios[0].mcf:isFlip?scenarios[0].profit:scenarios[0].fee;
+                    const diff = val-base;
+                    return <span style={{fontSize:11,color:diff>=0?"#059669":"#dc2626",fontWeight:600}}>{diff>=0?"+":""}{fmtD(diff)}</span>;
+                  })()}
+                  <span style={{fontSize:13,fontWeight:isBase?800:700,fontFamily:"'DM Mono',monospace",color:val>=0?s.color:"#dc2626"}}>{fmtD(val||0)}{isIncome?"/mo":""}</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </ProGate>
+  );
+}
+
+// ─── DECISION MODE TAB CONTENT ─────────────────────────────────────────────────
+function DecisionMode({metrics, strategy, isPro}) {
+  const risk = useMemo(()=>calcRiskScore(metrics, strategy),[metrics,strategy]);
+
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:16}}>
+      {/* Risk Score Hero */}
+      <ProGate isPro={isPro} trigger="unlock">
+        <div style={{background:"linear-gradient(135deg,#064e3b,#065f46)",borderRadius:16,padding:"22px 24px"}}>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16,flexWrap:"wrap",gap:12}}>
+            <div>
+              <div style={{fontSize:10,fontWeight:700,color:"rgba(255,255,255,0.5)",textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:4}}>Risk Score</div>
+              <div style={{display:"flex",alignItems:"baseline",gap:10}}>
+                <span style={{fontSize:52,fontWeight:900,fontFamily:"'DM Mono',monospace",color:risk.grade==="A"?"#6ee7b7":risk.grade==="B"?"#93c5fd":risk.grade==="C"?"#fde68a":risk.grade==="D"?"#fdba74":"#fca5a5",lineHeight:1}}>{risk.score}</span>
+                <span style={{fontSize:16,color:"rgba(255,255,255,0.4)"}}>/100</span>
+              </div>
+            </div>
+            <div style={{textAlign:"center"}}>
+              <div style={{width:64,height:64,borderRadius:"50%",background:risk.gradeColor,display:"flex",alignItems:"center",justifyContent:"center",marginBottom:6,boxShadow:`0 0 0 6px ${risk.gradeColor}30`}}>
+                <span style={{fontSize:28,fontWeight:900,color:"white",fontFamily:"'Fraunces',serif"}}>{risk.grade}</span>
+              </div>
+              <div style={{fontSize:10,color:"rgba(255,255,255,0.5)"}}>Grade</div>
+            </div>
+            <div style={{background:risk.verdictBg,borderRadius:12,padding:"10px 18px",border:`1.5px solid ${risk.verdictColor}30`}}>
+              <div style={{fontSize:10,color:"#6b7280",textTransform:"uppercase",fontWeight:700,marginBottom:3}}>Verdict</div>
+              <div style={{fontSize:16,fontWeight:800,color:risk.verdictColor}}>{risk.verdict}</div>
+            </div>
+          </div>
+          {/* Score bar */}
+          <div style={{height:8,background:"rgba(255,255,255,0.1)",borderRadius:4,overflow:"hidden",marginBottom:12}}>
+            <div style={{height:"100%",width:`${risk.score}%`,background:risk.gradeColor,borderRadius:4,transition:"width 0.6s ease"}}/>
+          </div>
+          {/* Flags + strengths */}
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+            {risk.strengths.map(s=><span key={s} style={{fontSize:11,background:"rgba(110,231,183,0.15)",color:"#6ee7b7",padding:"3px 10px",borderRadius:100,border:"1px solid rgba(110,231,183,0.3)"}}>✓ {s}</span>)}
+            {risk.flags.map(f=><span key={f} style={{fontSize:11,background:"rgba(252,165,165,0.15)",color:"#fca5a5",padding:"3px 10px",borderRadius:100,border:"1px solid rgba(252,165,165,0.3)"}}>⚠ {f}</span>)}
+          </div>
+        </div>
+      </ProGate>
+
+      {/* Capital Efficiency */}
+      <ProGate isPro={isPro} trigger="unlock">
+        <div style={{background:"white",borderRadius:12,border:"1.5px solid #e5e7eb",padding:"16px 18px"}}>
+          <div style={{fontSize:11,fontWeight:700,color:"#374151",textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:14}}>Capital Efficiency Analysis</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+            {(()=>{
+              const items = [];
+              if(metrics.coc!==undefined) items.push(["CoC Return",fmtP(metrics.coc),metrics.coc>=0.1?"#059669":metrics.coc>=0.06?"#d97706":"#dc2626"]);
+              if(metrics.dscr!==undefined) items.push(["DSCR",metrics.dscr.toFixed(2)+"x",metrics.dscr>=1.35?"#059669":metrics.dscr>=1.2?"#d97706":"#dc2626"]);
+              if(metrics.mcf!==undefined) items.push(["CF Buffer",fmtD(metrics.mcf)+"/mo",metrics.mcf>=300?"#059669":metrics.mcf>=0?"#d97706":"#dc2626"]);
+              if(metrics.beo!==undefined) items.push(["Break-Even Occ.",fmtP(metrics.beo),metrics.beo<=0.8?"#059669":"#d97706"]);
+              if(metrics.roi!==undefined) items.push(["ROI",fmtP(metrics.roi),metrics.roi>=0.15?"#059669":"#d97706"]);
+              if(metrics.margin!==undefined) items.push(["Profit Margin",fmtP(metrics.margin),metrics.margin>=0.15?"#059669":"#d97706"]);
+              return items.slice(0,6).map(([l,v,c])=>(
+                <div key={l} style={{background:"#f9fafb",borderRadius:10,padding:"10px 12px",border:`1.5px solid ${c}20`}}>
+                  <div style={{fontSize:9,color:"#9ca3af",fontWeight:700,textTransform:"uppercase",marginBottom:4}}>{l}</div>
+                  <div style={{fontSize:16,fontWeight:800,fontFamily:"'DM Mono',monospace",color:c}}>{v}</div>
+                </div>
+              ));
+            })()}
+          </div>
+        </div>
+      </ProGate>
+
+      {/* Stress Test */}
+      <StressTest metrics={metrics} strategy={strategy} isPro={isPro}/>
+
+      {/* Upgrade nudge for free users */}
+      {!isPro&&(
+        <div style={{textAlign:"center",padding:"16px",background:"#f0fdf4",borderRadius:12,border:"1.5px solid #bbf7d0"}}>
+          <div style={{fontSize:13,fontWeight:700,color:"#059669",marginBottom:4}}>🧠 Decision Intelligence is Pro-only</div>
+          <div style={{fontSize:12,color:"#6b7280",marginBottom:10}}>Risk scores, stress testing, and capital grades update live as you type.</div>
+          <div style={{fontSize:12,color:"#374151",fontWeight:600}}>$20/mo — cancel anytime</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 function RentalCalc({saved,onCalcChange,profile}) {
   const [addr,setAddr]=useState(saved?.address||"");
   const [advMode,setAdvMode]=useState(false);
@@ -366,8 +673,21 @@ function RentalCalc({saved,onCalcChange,profile}) {
 
   const dscrColor=c.dscr>=1.35?"#059669":c.dscr>=1.2?"#d97706":"#dc2626";
 
+  const [calcTab,setCalcTab]=useState("calc");
+  const isPro=profile?.is_pro||false;
+  const dmMetrics={mcf:c.mcf,coc:c.coc,dscr:c.dscr,beo:c.beo,ltv:+i.pp>0?(+i.pp*(1-+i.down/100))/+i.pp:0,rent:+i.rent,expenses:totalExp,mortgage:mortgagePmt,pp:+i.pp};
+
   return (<>
     <AddressBar value={addr} onChange={setAddr}/>
+    <div style={{display:"flex",gap:6,marginBottom:18,background:"#f3f4f6",borderRadius:10,padding:3}}>
+      {[["calc","🏠 Calculator"],["decision","🧠 Decision Mode"]].map(([key,label])=>(
+        <button key={key} onClick={()=>setCalcTab(key)} style={{flex:1,padding:"7px 12px",borderRadius:8,border:"none",background:calcTab===key?"white":"transparent",color:calcTab===key?"#111827":"#6b7280",fontSize:12,fontWeight:calcTab===key?700:500,cursor:"pointer",boxShadow:calcTab===key?"0 1px 4px rgba(0,0,0,0.08)":"none",transition:"all 0.15s",display:"flex",alignItems:"center",justifyContent:"center",gap:5}}>
+          {label}{key==="decision"&&!isPro&&<span style={{fontSize:9,background:"#f0fdf4",color:"#059669",padding:"1px 5px",borderRadius:100,fontWeight:700}}>PRO</span>}
+        </button>
+      ))}
+    </div>
+    {calcTab==="decision"&&<DecisionMode metrics={dmMetrics} strategy="rental" isPro={isPro}/>}
+    {calcTab==="calc"&&<>
     <div style={{display:"flex",gap:8,marginBottom:18}}>
       {[false,true].map(adv=>(
         <button key={String(adv)} onClick={()=>setAdvMode(adv)} style={{padding:"7px 18px",borderRadius:100,border:`1.5px solid ${advMode===adv?"#10b981":"#e5e7eb"}`,background:advMode===adv?"#f0fdf4":"white",color:advMode===adv?"#059669":"#6b7280",fontSize:12,fontWeight:700,cursor:"pointer"}}>{adv?"Advanced (Projections)":"Basic"}</button>
@@ -481,6 +801,7 @@ function RentalCalc({saved,onCalcChange,profile}) {
         )}
       </div>
     </div>
+    </>}
   </>);
 }
 function WholesaleCalc({saved,onCalcChange}) {
@@ -511,8 +832,21 @@ function WholesaleCalc({saved,onCalcChange}) {
 
   useEffect(()=>onCalcChange({...i,address:addr},{primary:fmtD(c.mao),secondary:fmtD(+i.fee),label:"MAO",label2:"Your Fee"}),[i,c,addr]);
 
+  const [calcTab,setCalcTab]=useState("calc");
+  const isPro=false; // wire to profile.is_pro when Stripe ready
+  const dmMetrics={mao:c.mao,arv:+i.arv,repairs:+i.repairs,fee:+i.fee,margin:c.marginPct};
+
   return (<>
     <AddressBar value={addr} onChange={setAddr}/>
+    <div style={{display:"flex",gap:6,marginBottom:16,background:"#f3f4f6",borderRadius:10,padding:3}}>
+      {[["calc","🏠 Calculator"],["decision","🧠 Decision Mode"]].map(([key,label])=>(
+        <button key={key} onClick={()=>setCalcTab(key)} style={{flex:1,padding:"7px 12px",borderRadius:8,border:"none",background:calcTab===key?"white":"transparent",color:calcTab===key?"#111827":"#6b7280",fontSize:12,fontWeight:calcTab===key?700:500,cursor:"pointer",boxShadow:calcTab===key?"0 1px 4px rgba(0,0,0,0.08)":"none",transition:"all 0.15s",display:"flex",alignItems:"center",justifyContent:"center",gap:5}}>
+          {label}{key==="decision"&&!isPro&&<span style={{fontSize:9,background:"#f0fdf4",color:"#059669",padding:"1px 5px",borderRadius:100,fontWeight:700}}>PRO</span>}
+        </button>
+      ))}
+    </div>
+    {calcTab==="decision"&&<DecisionMode metrics={dmMetrics} strategy="wholesale" isPro={isPro}/>}
+    {calcTab==="calc"&&<>
     {/* Mode toggle */}
     <div style={{display:"flex",gap:8,marginBottom:16}}>
       {[[false,"Basic (70% Rule)"],[true,"Advanced Mode"]].map(([adv,label])=>(
@@ -586,6 +920,7 @@ function WholesaleCalc({saved,onCalcChange}) {
         </div>
       </div>
     </div>
+    </>}
   </>);
 }
 function FlipCalc({saved,onCalcChange}) {
@@ -624,8 +959,21 @@ function FlipCalc({saved,onCalcChange}) {
 
   useEffect(()=>onCalcChange({...i,address:addr},{primary:fmtD(c.profit),secondary:fmtP(c.annRoi),label:"Net Profit",label2:"Ann. ROI"}),[i,c,addr]);
 
+  const [calcTab,setCalcTab]=useState("calc");
+  const isPro=false;
+  const dmMetrics={profit:c.profit,arv:+i.arv,roi:c.annRoi,margin:+i.arv>0?c.profit/+i.arv:0,months:+i.months,costs:c.totalCosts,holdingMoCost:(+i.taxesMo+ +i.insuranceMo+ +i.utilitiesMo)};
+
   return (<>
     <AddressBar value={addr} onChange={setAddr}/>
+    <div style={{display:"flex",gap:6,marginBottom:16,background:"#f3f4f6",borderRadius:10,padding:3}}>
+      {[["calc","🏠 Calculator"],["decision","🧠 Decision Mode"]].map(([key,label])=>(
+        <button key={key} onClick={()=>setCalcTab(key)} style={{flex:1,padding:"7px 12px",borderRadius:8,border:"none",background:calcTab===key?"white":"transparent",color:calcTab===key?"#111827":"#6b7280",fontSize:12,fontWeight:calcTab===key?700:500,cursor:"pointer",boxShadow:calcTab===key?"0 1px 4px rgba(0,0,0,0.08)":"none",transition:"all 0.15s",display:"flex",alignItems:"center",justifyContent:"center",gap:5}}>
+          {label}{key==="decision"&&!isPro&&<span style={{fontSize:9,background:"#f0fdf4",color:"#059669",padding:"1px 5px",borderRadius:100,fontWeight:700}}>PRO</span>}
+        </button>
+      ))}
+    </div>
+    {calcTab==="decision"&&<DecisionMode metrics={dmMetrics} strategy="flip" isPro={isPro}/>}
+    {calcTab==="calc"&&<>
     {/* Financing toggle */}
     <div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"}}>
       {[["cash","💵 Cash"],["hard","🏦 Hard Money"],["private","🤝 Private Money"],["conventional","🏠 Conventional"]].map(([k,label])=>(
@@ -709,9 +1057,9 @@ function FlipCalc({saved,onCalcChange}) {
           <div style={{fontSize:10,fontWeight:700,color:"#92400e",textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:10}}>Decision Metrics</div>
           <div style={{display:"flex",justifyContent:"space-between",marginBottom:7}}><span style={{fontSize:12,color:"#6b7280"}}>Breakeven Sale Price</span><span style={{fontSize:13,fontWeight:700,fontFamily:"'DM Mono',monospace",color:"#374151"}}>{fmtD(c.breakeven)}</span></div>
           <div style={{display:"flex",justifyContent:"space-between"}}><span style={{fontSize:12,color:"#6b7280"}}>Required Sale for Target</span><span style={{fontSize:13,fontWeight:700,fontFamily:"'DM Mono',monospace",color:"#374151"}}>{fmtD(c.reqForTarget)}</span></div>
-        </div>
-      </div>
+        </div>      </div>
     </div>
+    </>}
   </>);
 }
 function BRRRRCalc({saved,onCalcChange}) {
@@ -751,8 +1099,21 @@ function BRRRRCalc({saved,onCalcChange}) {
 
   useEffect(()=>onCalcChange({...i,address:addr},{primary:fmtD(c.cashLeftInDeal===0?c.netRefi-c.totalIn:-(c.cashLeftInDeal)),secondary:fmtD(c.mcf),label:"Cash Left In",label2:"Mo. Cash Flow"}),[i,c,addr]);
 
+  const [calcTab,setCalcTab]=useState("calc");
+  const isPro=false;
+  const dmMetrics={mcf:c.mcf,coc:c.coc||0,dscr:c.dscr,beo:0,ltv:+i.arv>0?c.refiAmt/+i.arv:0,rent:+i.rent,expenses:totalExp,mortgage:c.refiPmt,pp:+i.pp};
+
   return (<>
     <AddressBar value={addr} onChange={setAddr}/>
+    <div style={{display:"flex",gap:6,marginBottom:16,background:"#f3f4f6",borderRadius:10,padding:3}}>
+      {[["calc","🏠 Calculator"],["decision","🧠 Decision Mode"]].map(([key,label])=>(
+        <button key={key} onClick={()=>setCalcTab(key)} style={{flex:1,padding:"7px 12px",borderRadius:8,border:"none",background:calcTab===key?"white":"transparent",color:calcTab===key?"#111827":"#6b7280",fontSize:12,fontWeight:calcTab===key?700:500,cursor:"pointer",boxShadow:calcTab===key?"0 1px 4px rgba(0,0,0,0.08)":"none",transition:"all 0.15s",display:"flex",alignItems:"center",justifyContent:"center",gap:5}}>
+          {label}{key==="decision"&&!isPro&&<span style={{fontSize:9,background:"#f0fdf4",color:"#059669",padding:"1px 5px",borderRadius:100,fontWeight:700}}>PRO</span>}
+        </button>
+      ))}
+    </div>
+    {calcTab==="decision"&&<DecisionMode metrics={dmMetrics} strategy="brrrr" isPro={isPro}/>}
+    {calcTab==="calc"&&<>
     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:24}}>
       <div style={{display:"flex",flexDirection:"column",gap:10}}>
         <Divider label="Acquisition"/>
@@ -836,6 +1197,7 @@ function BRRRRCalc({saved,onCalcChange}) {
         </div>
       </div>
     </div>
+    </>}
   </>);
 }
 
@@ -900,8 +1262,21 @@ function SubToCalc({saved,onCalcChange,profile}) {
 
   useEffect(()=>onCalcChange({...i,address:addr},{primary:fmtD(c.mcf),secondary:fmtP(c.roi),label:"Mo. Cash Flow",label2:"ROI"}),[i,c,addr]);
 
+  const [calcTab,setCalcTab]=useState("calc");
+  const isPro=profile?.is_pro||false;
+  const dmMetrics={mcf:c.mcf,coc:c.roi,dscr:+i.pmt>0?(+i.rent-totalExp)/+i.pmt:0,beo:+i.rent>0?(totalExp+ +i.pmt)/+i.rent:0,ltv:+i.marketValue>0?+i.balance/+i.marketValue:0,rent:+i.rent,expenses:totalExp,mortgage:+i.pmt,pp:+i.marketValue};
+
   return (<>
     <AddressBar value={addr} onChange={setAddr}/>
+    <div style={{display:"flex",gap:6,marginBottom:16,background:"#f3f4f6",borderRadius:10,padding:3}}>
+      {[["calc","🏠 Calculator"],["decision","🧠 Decision Mode"]].map(([key,label])=>(
+        <button key={key} onClick={()=>setCalcTab(key)} style={{flex:1,padding:"7px 12px",borderRadius:8,border:"none",background:calcTab===key?"white":"transparent",color:calcTab===key?"#111827":"#6b7280",fontSize:12,fontWeight:calcTab===key?700:500,cursor:"pointer",boxShadow:calcTab===key?"0 1px 4px rgba(0,0,0,0.08)":"none",transition:"all 0.15s",display:"flex",alignItems:"center",justifyContent:"center",gap:5}}>
+          {label}{key==="decision"&&!isPro&&<span style={{fontSize:9,background:"#f0fdf4",color:"#059669",padding:"1px 5px",borderRadius:100,fontWeight:700}}>PRO</span>}
+        </button>
+      ))}
+    </div>
+    {calcTab==="decision"&&<DecisionMode metrics={dmMetrics} strategy="subto" isPro={isPro}/>}
+    {calcTab==="calc"&&<>
     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:24}}>
       <div style={{display:"flex",flexDirection:"column",gap:10}}>
         <Divider label="Existing Loan"/>
@@ -993,9 +1368,9 @@ function SubToCalc({saved,onCalcChange,profile}) {
 
         <button onClick={()=>generateAndDownload("subto",{...i,address:addr},c,profile)} style={{padding:"11px 16px",borderRadius:10,border:"2px dashed #a5f3fc",background:"#ecfeff",color:"#0891b2",fontSize:13,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",gap:8,justifyContent:"center"}}>
           📄 Generate Subject-To Offer Letter (.doc)
-        </button>
-      </div>
+        </button>      </div>
     </div>
+    </>}
   </>);
 }
 function NovationCalc({saved,onCalcChange,profile}) {
@@ -1033,9 +1408,21 @@ function NovationCalc({saved,onCalcChange,profile}) {
 
   useEffect(()=>onCalcChange({...i,address:addr},{primary:fmtD(c.profit),secondary:fmtP(c.annRoi),label:"Net Profit",label2:"Ann. ROI"}),[i,c,addr]);
 
+  const [calcTab,setCalcTab]=useState("calc");
+  const isPro=profile?.is_pro||false;
+  const dmMetrics={profit:c.profit,arv:+i.arv,roi:c.annRoi,margin:c.profitPctArv,months:+i.months,costs:c.tc,holdingMoCost:(+i.taxesMo+ +i.insuranceMo+ +i.utilitiesMo)};
+
   return (<>
     <AddressBar value={addr} onChange={setAddr}/>
-
+    <div style={{display:"flex",gap:6,marginBottom:16,background:"#f3f4f6",borderRadius:10,padding:3}}>
+      {[["calc","🏠 Calculator"],["decision","🧠 Decision Mode"]].map(([key,label])=>(
+        <button key={key} onClick={()=>setCalcTab(key)} style={{flex:1,padding:"7px 12px",borderRadius:8,border:"none",background:calcTab===key?"white":"transparent",color:calcTab===key?"#111827":"#6b7280",fontSize:12,fontWeight:calcTab===key?700:500,cursor:"pointer",boxShadow:calcTab===key?"0 1px 4px rgba(0,0,0,0.08)":"none",transition:"all 0.15s",display:"flex",alignItems:"center",justifyContent:"center",gap:5}}>
+          {label}{key==="decision"&&!isPro&&<span style={{fontSize:9,background:"#f0fdf4",color:"#059669",padding:"1px 5px",borderRadius:100,fontWeight:700}}>PRO</span>}
+        </button>
+      ))}
+    </div>
+    {calcTab==="decision"&&<DecisionMode metrics={dmMetrics} strategy="novation" isPro={isPro}/>}
+    {calcTab==="calc"&&<>
     {/* Sale price sensitivity */}
     <div style={{background:"#fdf2f8",borderRadius:10,padding:"12px 16px",border:"1.5px solid #fbcfe8",marginBottom:18}}>
       <div style={{fontSize:10,fontWeight:700,color:"#be185d",textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:8}}>Sale Price Sensitivity</div>
@@ -1137,6 +1524,7 @@ function NovationCalc({saved,onCalcChange,profile}) {
         </button>
       </div>
     </div>
+    </>}
   </>);
 }
 
@@ -2934,45 +3322,34 @@ function LandingPage({onGoSignIn,onGoSignUp}) {
             ))}
           </div>
 
-          {/* Demo calculator */}
-          <div id="demo" style={{background:"white",borderRadius:"20px 20px 0 0",border:"1.5px solid #e5e7eb",borderBottom:"none",boxShadow:"0 -4px 40px rgba(0,0,0,0.06)",overflow:"hidden"}}>
-            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"16px 28px",background:active.bg,borderBottom:`1.5px solid ${active.border}`}}>
-              <div style={{display:"flex",alignItems:"center",gap:12}}>
-                <span style={{fontSize:20}}>{active.icon}</span>
-                <div><h3 style={{fontSize:15,fontWeight:700,color:active.color}}>{active.label} Calculator</h3><p style={{fontSize:11,color:active.color,opacity:0.7}}>{active.sub}</p></div>
+          {/* Live calculator preview with signup overlay */}
+          <div id="demo" style={{position:"relative",borderRadius:"20px 20px 0 0",overflow:"hidden",boxShadow:"0 -4px 40px rgba(0,0,0,0.06)"}}>
+            {/* Header */}
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"14px 24px",background:active.bg,border:`1.5px solid ${active.border}`,borderBottom:"none"}}>
+              <div style={{display:"flex",alignItems:"center",gap:10}}>
+                <span style={{fontSize:18}}>{active.icon}</span>
+                <div><h3 style={{fontSize:14,fontWeight:700,color:active.color}}>{active.label} Calculator</h3><p style={{fontSize:10,color:active.color,opacity:0.7}}>{active.sub}</p></div>
               </div>
-              <div style={{display:"flex",alignItems:"center",gap:8,background:"white",border:"1.5px solid #e5e7eb",borderRadius:100,padding:"5px 14px"}}>
-                <span style={{fontSize:12}}>👀</span><span style={{fontSize:12,color:"#6b7280",fontWeight:500}}>Demo — sign up to use your own numbers</span>
-              </div>
-            </div>
-            <div style={{padding:"28px",display:"grid",gridTemplateColumns:"260px 1fr",gap:28,alignItems:"start"}}>
-              <div style={{display:"flex",flexDirection:"column",gap:8}}>
-                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:4}}>
-                  <span style={{fontSize:10,fontWeight:700,letterSpacing:"0.08em",textTransform:"uppercase",color:"#9ca3af"}}>Inputs</span>
-                  <button onClick={onGoSignUp} style={{display:"flex",alignItems:"center",gap:5,padding:"4px 10px",borderRadius:100,border:"1.5px solid #e5e7eb",background:"white",color:"#6b7280",fontSize:11,fontWeight:600,cursor:"pointer"}}>✏️ Edit</button>
-                </div>
-                {data.inputs.map(([label,value],idx)=>(
-                  <div key={idx} onClick={onGoSignUp} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 12px",background:"#f9fafb",border:"1.5px solid #e5e7eb",borderRadius:8,cursor:"pointer",transition:"border-color 0.15s"}}
-                    onMouseEnter={e=>e.currentTarget.style.borderColor=active.border}
-                    onMouseLeave={e=>e.currentTarget.style.borderColor="#e5e7eb"}>
-                    <span style={{fontSize:12,color:"#6b7280"}}>{label}</span>
-                    <span style={{fontSize:13,fontWeight:600,color:"#374151",fontFamily:"'DM Mono',monospace"}}>{value}</span>
-                  </div>
-                ))}
-                <button onClick={onGoSignUp} style={{marginTop:6,padding:"11px 0",borderRadius:10,border:"2px dashed #d1fae5",background:"#f0fdf4",color:"#059669",fontSize:13,fontWeight:600,cursor:"pointer"}}>✏️ Enter your own numbers →</button>
-              </div>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
-                {data.highlights.map(([label,value,positive],idx)=>(
-                  <div key={idx} style={{textAlign:"center",padding:"16px 12px",background:positive?"#f0fdf4":"#f9fafb",borderRadius:10,border:`1.5px solid ${positive?"#bbf7d0":"#e5e7eb"}`}}>
-                    <div style={{fontSize:10,fontWeight:700,letterSpacing:"0.06em",textTransform:"uppercase",color:"#9ca3af",marginBottom:6}}>{label}</div>
-                    <div style={{fontSize:22,fontWeight:800,fontFamily:"'DM Mono',monospace",color:positive?"#059669":"#374151"}}>{value}</div>
-                  </div>
-                ))}
+              <div style={{display:"flex",alignItems:"center",gap:6,background:"white",border:"1.5px solid #e5e7eb",borderRadius:100,padding:"4px 12px"}}>
+                <span style={{fontSize:11}}>👀</span><span style={{fontSize:11,color:"#6b7280",fontWeight:500}}>Live preview</span>
               </div>
             </div>
-            <div style={{padding:"14px 28px",borderTop:"1px solid #f3f4f6",background:"#fafafa",display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:12}}>
-              <p style={{fontSize:13,color:"#9ca3af"}}>🔒 Sample numbers. <button onClick={onGoSignUp} style={{color:"#10b981",fontWeight:700,background:"none",border:"none",cursor:"pointer",fontSize:13,padding:0}}>Sign up free →</button></p>
-              <button onClick={onGoSignUp} style={{padding:"8px 18px",borderRadius:8,border:"none",background:"#111827",color:"white",fontSize:12,fontWeight:600,cursor:"pointer"}}>Try it free</button>
+            {/* Real calculator rendered underneath */}
+            <div style={{background:"white",border:"1.5px solid #e5e7eb",borderTop:"none",padding:"24px",maxHeight:520,overflow:"hidden",pointerEvents:"none",userSelect:"none"}}>
+              {mode==="rental"&&<RentalCalc saved={{pp:320000,down:20,rate:7.5,term:30,cc:8500,rehab:0,rent:2800,taxes:350,insurance:120,vacancy:140,repairs:100,capex:100,mgmt:224,utilities:0,hoa:0,appreciation:3,rentGrowth:2,expenseGrowth:2}} onCalcChange={()=>{}}/>}
+              {mode==="wholesale"&&<WholesaleCalc saved={{arv:240000,repairs:28000,pct:70,fee:9000,holding:3500,closing:4000,profitTarget:25000,profitPct:10}} onCalcChange={()=>{}}/>}
+              {mode==="flip"&&<FlipCalc saved={{pp:165000,rehab:38000,arv:275000,months:6,agent:6,closing:5000,taxesMo:200,insuranceMo:150,utilitiesMo:100,targetProfit:40000,targetPct:15,rate:12,points:2,downPct:20}} onCalcChange={()=>{}}/>}
+              {mode==="brrrr"&&<BRRRRCalc saved={{pp:110000,rehab:45000,arv:210000,stabilizeMonths:4,holdingMo:600,refPct:75,refiRate:7.0,refiTerm:30,refiPoints:1,refiClosing:3500,rent:1750,taxes:200,insurance:100,vacancy:88,repairs:88,capex:88,mgmt:140}} onCalcChange={()=>{}}/>}
+              {mode==="subto"&&<SubToCalc saved={{balance:175000,rate:3.5,yearsLeft:25,pmt:1050,dp:8000,cc:2500,marketValue:220000,rent:1700,taxes:180,insurance:90,maintenance:85,vacancy:85,mgmt:136,appreciation:3,exitYears:5}} onCalcChange={()=>{}}/>}
+              {mode==="novation"&&<NovationCalc saved={{pp:155000,repairs:22000,arv:270000,months:4,agent:6,closing:4500,sellerPayout:12000,sellerPayoutType:"cash",taxesMo:180,insuranceMo:120,utilitiesMo:80,targetProfit:40000,targetPct:15}} onCalcChange={()=>{}}/>}
+            </div>
+            {/* Signup overlay — bottom gradient + CTA */}
+            <div style={{position:"absolute",bottom:0,left:0,right:0,height:280,background:"linear-gradient(to top,rgba(255,255,255,1) 40%,rgba(255,255,255,0))",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"flex-end",paddingBottom:28}}>
+              <div style={{textAlign:"center",marginBottom:16}}>
+                <div style={{fontSize:15,fontWeight:700,color:"#111827",marginBottom:6}}>🔒 Use your own numbers</div>
+                <div style={{fontSize:13,color:"#6b7280"}}>Sign up free to unlock all 6 calculators</div>
+              </div>
+              <button onClick={onGoSignUp} style={{padding:"13px 32px",borderRadius:11,border:"none",background:"#10b981",color:"white",fontSize:15,fontWeight:700,cursor:"pointer",boxShadow:"0 4px 20px rgba(16,185,129,0.35)"}}>Start Free Trial →</button>
             </div>
           </div>
         </div>
