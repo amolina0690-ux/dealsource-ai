@@ -69,6 +69,38 @@ function GlobalStyles() {
     @keyframes spin{from{transform:rotate(0deg);}to{transform:rotate(360deg);}}
     @keyframes pulse{0%,100%{opacity:1;}50%{opacity:0.45;}}
     .fadein{animation:fadeUp 0.35s ease both;}
+    @media(max-width:768px){
+      .calc-grid{grid-template-columns:1fr !important;}
+      .hide-mobile{display:none !important;}
+      .mode-pills{gap:6px !important; flex-wrap:wrap !important;}
+      .mode-pill-sub{display:none !important;}
+      .top-nav-tabs{display:none !important;}
+      .calc-pad{padding:14px 12px !important;}
+      .auth-split{grid-template-columns:1fr !important;}
+      .auth-left{display:none !important;}
+      .auth-right{padding:28px 20px !important;}
+      .deal-cards-grid{grid-template-columns:1fr !important;}
+      .profile-tabs{overflow-x:auto !important; flex-wrap:nowrap !important;}
+      .profile-tabs button{white-space:nowrap; flex-shrink:0;}
+      .decision-hero{padding:16px 14px !important;}
+      .header-profile-name{display:none !important;}
+      .header-save-flash{display:none !important;}
+      .main-content{padding-bottom:80px !important;}
+      body{-webkit-text-size-adjust:100%;}
+    }
+    .bottom-nav{
+      display:none;
+      position:fixed;
+      bottom:0; left:0; right:0;
+      background:white;
+      border-top:1.5px solid #e5e7eb;
+      z-index:200;
+      padding:6px 0 env(safe-area-inset-bottom, 6px);
+      box-shadow:0 -4px 20px rgba(0,0,0,0.06);
+    }
+    @media(max-width:768px){
+      .bottom-nav{display:flex !important;}
+    }
   `}</style>;
 }
 
@@ -150,8 +182,8 @@ function MedalBadge({profile,size="sm"}) {
 // ─── Auth Layout ───────────────────────────────────────────────────────────────
 function AuthLayout({children,title,subtitle}) {
   return (
-    <div style={{minHeight:"100vh",display:"grid",gridTemplateColumns:"1fr 1fr",background:"#fff"}}>
-      <div style={{background:"linear-gradient(160deg,#064e3b 0%,#065f46 40%,#047857 100%)",display:"flex",flexDirection:"column",justifyContent:"space-between",padding:48,position:"relative",overflow:"hidden"}}>
+    <div className="auth-split" style={{minHeight:"100vh",display:"grid",gridTemplateColumns:"1fr 1fr",background:"#fff"}}>
+      <div className="auth-left" style={{background:"linear-gradient(160deg,#064e3b 0%,#065f46 40%,#047857 100%)",display:"flex",flexDirection:"column",justifyContent:"space-between",padding:48,position:"relative",overflow:"hidden"}}>
         <div style={{position:"absolute",inset:0,backgroundImage:"radial-gradient(circle at 20% 80%,rgba(16,185,129,0.15) 0%,transparent 50%)",pointerEvents:"none"}}/>
         <Logo size="md"/>
         <div>
@@ -171,7 +203,7 @@ function AuthLayout({children,title,subtitle}) {
         </div>
         <p style={{fontSize:12,color:"rgba(255,255,255,0.3)"}}>© 2025 DealSource.ai</p>
       </div>
-      <div style={{display:"flex",alignItems:"center",justifyContent:"center",padding:"48px 56px",overflowY:"auto"}}>
+      <div className="auth-right" style={{display:"flex",alignItems:"center",justifyContent:"center",padding:"48px 56px",overflowY:"auto"}}>
         <div style={{width:"100%",maxWidth:420}}>
           <div style={{marginBottom:32}}>
             <h1 style={{fontFamily:"'Fraunces',serif",fontSize:28,fontWeight:800,color:"#111827",marginBottom:6}}>{title}</h1>
@@ -418,7 +450,7 @@ function UpgradeModal({onClose, trigger="unlock", onActivatePro}) {
 
   return (
     <div onClick={e=>e.target===e.currentTarget&&onClose()} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.6)",backdropFilter:"blur(6px)",zIndex:800,display:"flex",alignItems:"center",justifyContent:"center",padding:24}}>
-      <div style={{background:"white",borderRadius:24,padding:0,maxWidth:460,width:"100%",boxShadow:"0 32px 80px rgba(0,0,0,0.2)",overflow:"hidden",animation:"popIn 0.2s cubic-bezier(0.34,1.56,0.64,1) both"}}>
+      <div className="upgrade-modal" style={{background:"white",borderRadius:24,padding:0,maxWidth:460,width:"100%",boxShadow:"0 32px 80px rgba(0,0,0,0.2)",overflow:"hidden",animation:"popIn 0.2s cubic-bezier(0.34,1.56,0.64,1) both"}}>
         <div style={{background:"linear-gradient(135deg,#064e3b,#065f46)",padding:"28px 32px"}}>
           <div style={{fontSize:36,marginBottom:12}}>🧠</div>
           <h2 style={{fontFamily:"'Fraunces',serif",fontSize:22,fontWeight:800,color:"white",marginBottom:6}}>{msg.title}</h2>
@@ -643,12 +675,12 @@ function DecisionMode({metrics, strategy, isPro}) {
     <div style={{display:"flex",flexDirection:"column",gap:16}}>
       {/* Risk Score Hero */}
       <ProGate isPro={isPro} trigger="unlock">
-        <div style={{background:"linear-gradient(135deg,#064e3b,#065f46)",borderRadius:16,padding:"22px 24px"}}>
+        <div className="decision-hero" style={{background:"linear-gradient(135deg,#064e3b,#065f46)",borderRadius:16,padding:"22px 24px"}}>
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16,flexWrap:"wrap",gap:12}}>
             <div>
               <div style={{fontSize:10,fontWeight:700,color:"rgba(255,255,255,0.5)",textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:4}}>Risk Score</div>
               <div style={{display:"flex",alignItems:"baseline",gap:10}}>
-                <span style={{fontSize:52,fontWeight:900,fontFamily:"'DM Mono',monospace",color:risk.grade==="A"?"#6ee7b7":risk.grade==="B"?"#93c5fd":risk.grade==="C"?"#fde68a":risk.grade==="D"?"#fdba74":"#fca5a5",lineHeight:1}}>{risk.score}</span>
+                <span className="decision-score" style={{fontSize:52,fontWeight:900,fontFamily:"'DM Mono',monospace",color:risk.grade==="A"?"#6ee7b7":risk.grade==="B"?"#93c5fd":risk.grade==="C"?"#fde68a":risk.grade==="D"?"#fdba74":"#fca5a5",lineHeight:1}}>{risk.score}</span>
                 <span style={{fontSize:16,color:"rgba(255,255,255,0.4)"}}>/100</span>
               </div>
             </div>
@@ -788,7 +820,7 @@ function RentalCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro}) 
         <button key={String(adv)} onClick={()=>setAdvMode(adv)} style={{padding:"7px 18px",borderRadius:100,border:`1.5px solid ${advMode===adv?"#10b981":"#e5e7eb"}`,background:advMode===adv?"#f0fdf4":"white",color:advMode===adv?"#059669":"#6b7280",fontSize:12,fontWeight:700,cursor:"pointer"}}>{adv?"Advanced (Projections)":"Basic"}</button>
       ))}
     </div>
-    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:24}}>
+    <div className="calc-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:24}}>
       <div style={{display:"flex",flexDirection:"column",gap:10}}>
         <Divider label="Purchase"/>
         <Field label="Purchase Price" value={i.pp} onChange={s("pp")} prefix="$" step={5000}/>
@@ -959,7 +991,7 @@ function WholesaleCalc({saved,onCalcChange,isPro:isProProp,onActivatePro}) {
       {arvAdj!==0&&<div style={{fontSize:11,color:"#2563eb",marginTop:6,fontWeight:600}}>Adjusted ARV: {fmtD(c.adjArv)} ({arvAdj>0?"+":""}{arvAdj}% from stated)</div>}
     </div>
 
-    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:24}}>
+    <div className="calc-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:24}}>
       <div style={{display:"flex",flexDirection:"column",gap:10}}>
         <Divider label="Deal Details"/>
         <Field label="ARV" value={i.arv} onChange={s("arv")} prefix="$" step={5000}/>
@@ -1076,7 +1108,7 @@ function FlipCalc({saved,onCalcChange,isPro:isProProp,onActivatePro}) {
       ))}
     </div>
 
-    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:24}}>
+    <div className="calc-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:24}}>
       <div style={{display:"flex",flexDirection:"column",gap:10}}>
         <Divider label="Acquisition"/>
         <Field label="Purchase Price" value={i.pp} onChange={s("pp")} prefix="$" step={5000}/>
@@ -1209,7 +1241,7 @@ function BRRRRCalc({saved,onCalcChange,isPro:isProProp,onActivatePro}) {
     </div>
     {calcTab==="decision"&&<DecisionMode metrics={dmMetrics} strategy="brrrr" isPro={isPro}/>}
     {calcTab==="calc"&&<>
-    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:24}}>
+    <div className="calc-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:24}}>
       <div style={{display:"flex",flexDirection:"column",gap:10}}>
         <Divider label="Acquisition"/>
         <Field label="Purchase Price" value={i.pp} onChange={s("pp")} prefix="$" step={5000}/>
@@ -1372,7 +1404,7 @@ function SubToCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro}) {
     </div>
     {calcTab==="decision"&&<DecisionMode metrics={dmMetrics} strategy="subto" isPro={isPro}/>}
     {calcTab==="calc"&&<>
-    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:24}}>
+    <div className="calc-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:24}}>
       <div style={{display:"flex",flexDirection:"column",gap:10}}>
         <Divider label="Existing Loan"/>
         <Field label="Loan Balance" value={i.balance} onChange={s("balance")} prefix="$" step={5000}/>
@@ -1529,7 +1561,7 @@ function NovationCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro}
       {saleAdj!==100&&<div style={{fontSize:11,color:"#be185d",marginTop:6,fontWeight:600}}>Adjusted Sale: {fmtD(c.adjSale)} ({saleAdj}% of ARV)</div>}
     </div>
 
-    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:24}}>
+    <div className="calc-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:24}}>
       <div style={{display:"flex",flexDirection:"column",gap:10}}>
         <Divider label="Deal"/>
         <Field label="Purchase Price" value={i.pp} onChange={s("pp")} prefix="$" step={5000}/>
@@ -1894,7 +1926,7 @@ function ForumView({user, profile, savedDeals=[]}) {
       </div>
 
       {/* Filters */}
-      <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:22}}>
+      <div className="mode-pills" style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:22}}>
         <button onClick={()=>handleFilter("all")} style={{padding:"6px 14px",borderRadius:100,border:`1.5px solid ${filterMode==="all"?"#111827":"#e5e7eb"}`,background:filterMode==="all"?"#111827":"white",color:filterMode==="all"?"white":"#6b7280",fontSize:12,fontWeight:600,cursor:"pointer"}}>All</button>
         {MODES.map(m=>(
           <button key={m.key} onClick={()=>handleFilter(m.key)} style={{display:"flex",alignItems:"center",gap:5,padding:"6px 14px",borderRadius:100,border:`1.5px solid ${filterMode===m.key?m.border:"#e5e7eb"}`,background:filterMode===m.key?m.bg:"white",color:filterMode===m.key?m.color:"#6b7280",fontSize:12,fontWeight:600,cursor:"pointer"}}>{m.icon} {m.label}</button>
@@ -2787,7 +2819,7 @@ function ProfilePage({user,profile,onUpdate,onSignOut,onBack}) {
 
         {/* Tabs */}
         <div style={{display:"flex",background:"#f3f4f6",borderRadius:12,padding:4,gap:3,marginBottom:24,flexWrap:"wrap"}}>
-          {[["profile","👤 Profile"],["portfolio","🏠 Portfolio & Analyzer"],["mentoring","🎓 Mentoring"],["verify","✅ Verification"]].map(([key,label])=>(
+          {[["profile","👤 Profile"],["portfolio","🏠 Portfolio"],["mentoring","🎓 Mentoring"],["verify","✅ Verify"]].map(([key,label])=>(
             <button key={key} onClick={()=>setTab(key)} style={{flex:1,padding:"9px 12px",borderRadius:9,border:"none",background:tab===key?"white":"transparent",color:tab===key?"#111827":"#6b7280",fontSize:13,fontWeight:tab===key?700:500,cursor:"pointer",boxShadow:tab===key?"0 1px 4px rgba(0,0,0,0.08)":"none",transition:"all 0.15s",minWidth:120}}>{label}</button>
           ))}
         </div>
@@ -3702,7 +3734,7 @@ function AnalyzerApp({user,profile,onGoHome,onGoProfile,onSignOut}) {
       <header style={{background:"white",borderBottom:"1px solid #e5e7eb",position:"sticky",top:0,zIndex:100}}>
         <div style={{maxWidth:1280,margin:"0 auto",padding:"0 24px",display:"flex",alignItems:"center",justifyContent:"space-between",height:56}}>
           <Logo onClick={onGoHome}/>
-          <div style={{display:"flex",background:"#f3f4f6",borderRadius:10,padding:3,gap:2,overflowX:"auto"}}>
+          <div className="top-nav-tabs" style={{display:"flex",background:"#f3f4f6",borderRadius:10,padding:3,gap:2,overflowX:"auto"}}>
             {TABS.map(tab=>(
               <button key={tab.key} onClick={()=>setView(tab.key)} style={{display:"flex",alignItems:"center",gap:6,padding:"7px 14px",borderRadius:8,border:"none",background:view===tab.key?"white":"transparent",color:view===tab.key?"#111827":"#6b7280",fontSize:12,fontWeight:view===tab.key?700:500,cursor:"pointer",boxShadow:view===tab.key?"0 1px 4px rgba(0,0,0,0.08)":"none",transition:"all 0.15s",whiteSpace:"nowrap"}}>
                 <span>{tab.icon}</span>{tab.label}
@@ -3710,14 +3742,14 @@ function AnalyzerApp({user,profile,onGoHome,onGoProfile,onSignOut}) {
             ))}
           </div>
           <div style={{display:"flex",alignItems:"center",gap:10}}>
-            {savedFlash&&<span style={{fontSize:12,color:"#059669",fontWeight:600}}>✓ Saved!</span>}
+            {savedFlash&&<span className="header-save-flash" style={{fontSize:12,color:"#059669",fontWeight:600}}>✓ Saved!</span>}
             <button onClick={onGoProfile} style={{display:"flex",alignItems:"center",gap:8,padding:"5px 12px 5px 5px",borderRadius:100,border:"1.5px solid #e5e7eb",background:"white",cursor:"pointer",transition:"border-color 0.15s"}}
               onMouseEnter={e=>e.currentTarget.style.borderColor="#10b981"}
               onMouseLeave={e=>e.currentTarget.style.borderColor="#e5e7eb"}>
               <div style={{width:26,height:26,borderRadius:"50%",background:"linear-gradient(135deg,#10b981,#059669)",display:"flex",alignItems:"center",justifyContent:"center"}}>
                 <span style={{fontSize:10,fontWeight:800,color:"white"}}>{initials}</span>
               </div>
-              <span style={{fontSize:13,fontWeight:600,color:"#374151"}}>{profile?.full_name?.split(" ")[0]||"Profile"}</span>
+              <span className="header-profile-name" style={{fontSize:13,fontWeight:600,color:"#374151"}}>{profile?.full_name?.split(" ")[0]||"Profile"}</span>
               <span style={{fontSize:13}}>{medal.icon}</span>
               {profile?.is_verified&&<span style={{fontSize:9,background:"#f0fdf4",color:"#059669",border:"1px solid #bbf7d0",borderRadius:100,padding:"1px 5px",fontWeight:700}}>✓</span>}
             </button>
@@ -3726,15 +3758,15 @@ function AnalyzerApp({user,profile,onGoHome,onGoProfile,onSignOut}) {
       </header>
 
       {view==="calc"&&(
-        <div style={{maxWidth:1200,margin:"0 auto",padding:"24px"}}>
+        <div className="main-content" style={{maxWidth:1200,margin:"0 auto",padding:"24px"}}>
           <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:22}}>
             {MODES.map(m=>(
               <button key={m.key} onClick={()=>{setMode(m.key);setLoadedDealId(null);}}
-                style={{display:"flex",alignItems:"center",gap:8,padding:"8px 16px",borderRadius:100,border:`2px solid ${mode===m.key?m.border:"#e5e7eb"}`,background:mode===m.key?m.bg:"white",cursor:"pointer",transition:"all 0.15s"}}>
+                style={{display:"flex",alignItems:"center",gap:6,padding:"7px 12px",borderRadius:100,border:`2px solid ${mode===m.key?m.border:"#e5e7eb"}`,background:mode===m.key?m.bg:"white",cursor:"pointer",transition:"all 0.15s"}}>
                 <span>{m.icon}</span>
                 <div style={{lineHeight:1.2}}>
                   <div style={{fontSize:12,fontWeight:700,color:mode===m.key?m.color:"#374151"}}>{m.label}</div>
-                  <div style={{fontSize:9,color:mode===m.key?m.color:"#9ca3af",opacity:0.85}}>{m.sub}</div>
+                  <div className="mode-pill-sub" style={{fontSize:9,color:mode===m.key?m.color:"#9ca3af",opacity:0.85}}>{m.sub}</div>
                 </div>
               </button>
             ))}
@@ -3747,10 +3779,10 @@ function AnalyzerApp({user,profile,onGoHome,onGoProfile,onSignOut}) {
               </div>
               {loadedDealId&&<div style={{display:"flex",alignItems:"center",gap:7,background:"white",border:`1.5px solid ${activeMode.border}`,borderRadius:100,padding:"4px 12px"}}><span style={{fontSize:11}}>📂</span><span style={{fontSize:11,color:activeMode.color,fontWeight:600}}>Loaded from saved</span></div>}
             </div>
-            <div style={{padding:"24px 22px"}}>
+            <div className="calc-pad" style={{padding:"24px 22px"}}>
               <CalcComponent key={`${mode}-${loadedDealId}`} saved={loadedDealId?deals.find(d=>d.id===loadedDealId)?.inputs:null} onCalcChange={handleCalcChange} profile={{...profile,is_pro:isPro}} isPro={isPro} onActivatePro={()=>setIsPro(true)}/>
             </div>
-            <div style={{padding:"12px 22px",borderTop:"1px solid #f3f4f6",background:"#fafafa",display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>
+            <div style={{padding:"12px 16px",borderTop:"1px solid #f3f4f6",background:"#fafafa",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap"}}>
               <p style={{fontSize:12,color:"#9ca3af"}}>Updates as you type · Saved to your account</p>
               <div style={{display:"flex",gap:10}}>
                 <button onClick={()=>setView("deals")} style={{padding:"8px 16px",borderRadius:8,border:"1.5px solid #e5e7eb",background:"white",color:"#6b7280",fontSize:12,fontWeight:500,cursor:"pointer"}}>View Saved</button>
@@ -3762,7 +3794,7 @@ function AnalyzerApp({user,profile,onGoHome,onGoProfile,onSignOut}) {
       )}
 
       {view==="deals"&&(
-        <div style={{maxWidth:1200,margin:"0 auto",padding:"24px"}}>
+        <div className="main-content" style={{maxWidth:1200,margin:"0 auto",padding:"24px"}}>
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:22,flexWrap:"wrap",gap:14}}>
             <div><h2 style={{fontFamily:"'Fraunces',serif",fontSize:24,fontWeight:800,color:"#111827",marginBottom:2}}>Saved Deals</h2><p style={{fontSize:13,color:"#9ca3af"}}>{deals.length} deal{deals.length!==1?"s":""} synced</p></div>
             <Btn variant="primary" onClick={()=>setView("calc")}>⚡ New Analysis</Btn>
@@ -3779,13 +3811,29 @@ function AnalyzerApp({user,profile,onGoHome,onGoProfile,onSignOut}) {
           )}
           {dealsLoading?<div style={{textAlign:"center",padding:"60px",color:"#9ca3af"}}>Loading...</div>
           :deals.length===0?<div style={{textAlign:"center",padding:"80px 24px"}}><div style={{fontSize:52,marginBottom:16}}>🏠</div><h3 style={{fontFamily:"'Fraunces',serif",fontSize:22,fontWeight:800,color:"#111827",marginBottom:8}}>No saved deals yet</h3><p style={{fontSize:14,color:"#6b7280",maxWidth:340,margin:"0 auto 24px"}}>Run an analysis and hit "Save Deal" to build your library.</p><Btn variant="primary" onClick={()=>setView("calc")}>Go to Calculator →</Btn></div>
-          :<div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:16}}>{filteredDeals.map(deal=><SavedDealCard key={deal.id} deal={deal} onLoad={handleLoad} onDelete={handleDelete}/>)}</div>}
+          :<div className="deal-cards-grid" style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:16}}>{filteredDeals.map(deal=><SavedDealCard key={deal.id} deal={deal} onLoad={handleLoad} onDelete={handleDelete}/>)}</div>}
         </div>
       )}
 
       {view==="forum"&&<ForumView user={user} profile={profile} savedDeals={deals||[]}/>}
       {view==="leaderboard"&&<LeaderboardView user={user} profile={profile} onGoProfile={onGoProfile}/>}
       {view==="mentors"&&<MentorDirectory user={user} profile={profile}/>}
+
+      {/* Mobile Bottom Nav */}
+      <nav className="bottom-nav">
+        {TABS.map(tab=>(
+          <button key={tab.key} onClick={()=>setView(tab.key)} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,padding:"6px 4px",background:"none",border:"none",cursor:"pointer",color:view===tab.key?"#059669":"#9ca3af",transition:"color 0.15s"}}>
+            <span style={{fontSize:20}}>{tab.icon}</span>
+            <span style={{fontSize:9,fontWeight:view===tab.key?700:500,letterSpacing:"0.02em"}}>{tab.key==="deals"?"Saved":tab.label}</span>
+          </button>
+        ))}
+        <button onClick={onGoProfile} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,padding:"6px 4px",background:"none",border:"none",cursor:"pointer",color:"#9ca3af"}}>
+          <div style={{width:22,height:22,borderRadius:"50%",background:"linear-gradient(135deg,#10b981,#059669)",display:"flex",alignItems:"center",justifyContent:"center"}}>
+            <span style={{fontSize:9,fontWeight:800,color:"white"}}>{initials}</span>
+          </div>
+          <span style={{fontSize:9,fontWeight:500}}>Profile</span>
+        </button>
+      </nav>
     </div>
   );
 }
@@ -3837,4 +3885,3 @@ export default function Root() {
     {page==="profile"&&user&&<ProfilePage user={user} profile={profile} onUpdate={handleProfileUpdate} onSignOut={handleSignOut} onBack={()=>setPage("app")}/>}
   </>);
 }
-
