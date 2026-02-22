@@ -70,8 +70,9 @@ function GlobalStyles() {
     @keyframes pulse{0%,100%{opacity:1;}50%{opacity:0.45;}}
     .fadein{animation:fadeUp 0.35s ease both;}
     @media(max-width:768px){
-      .calc-grid{grid-template-columns:1fr !important;}
       .hide-mobile{display:none !important;}
+      .show-mobile{display:flex !important;}
+      .calc-grid{grid-template-columns:1fr !important;}
       .mode-pills{gap:6px !important; flex-wrap:wrap !important;}
       .mode-pill-sub{display:none !important;}
       .top-nav-tabs{display:none !important;}
@@ -83,11 +84,16 @@ function GlobalStyles() {
       .profile-tabs{overflow-x:auto !important; flex-wrap:nowrap !important;}
       .profile-tabs button{white-space:nowrap; flex-shrink:0;}
       .decision-hero{padding:16px 14px !important;}
+      .mentoring-grid{grid-template-columns:1fr !important; gap:32px !important;}
+      .field-grid-2{grid-template-columns:1fr 1fr !important;}
+      .results-grid{grid-template-columns:1fr 1fr !important;}
+      .landing-padding{padding:60px 20px !important;}
       .header-profile-name{display:none !important;}
       .header-save-flash{display:none !important;}
       .main-content{padding-bottom:80px !important;}
       body{-webkit-text-size-adjust:100%;}
     }
+    .show-mobile{display:none;}
     .bottom-nav{
       display:none;
       position:fixed;
@@ -332,7 +338,7 @@ function Divider({label}) {
 }
 function OutRow({label,value,highlight,positive,negative}) {
   const color=positive?"#059669":negative?"#dc2626":highlight?"#111827":"#374151";
-  return <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",borderBottom:"1px solid #f3f4f6"}}><span style={{fontSize:12,color:"#6b7280"}}>{label}</span><span style={{fontSize:highlight?14:13,fontWeight:highlight?700:500,fontFamily:"'DM Mono',monospace",color}}>{value}</span></div>;
+  return <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",borderBottom:"1px solid #f3f4f6",gap:8}}><span style={{fontSize:12,color:"#6b7280",flexShrink:0}}>{label}</span><span style={{fontSize:highlight?14:13,fontWeight:highlight?700:500,fontFamily:"'DM Mono',monospace",color,textAlign:"right"}}>{value}</span></div>;
 }
 function BigResult({label,value,positive,negative}) {
   const bg=positive?"#f0fdf4":negative?"#fef2f2":"#f9fafb";
@@ -824,7 +830,7 @@ function RentalCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro}) 
       <div style={{display:"flex",flexDirection:"column",gap:10}}>
         <Divider label="Purchase"/>
         <Field label="Purchase Price" value={i.pp} onChange={s("pp")} prefix="$" step={5000}/>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+        <div className="field-grid-2" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
           <Field label="Down Payment" value={i.down} onChange={s("down")} suffix="%" step={0.5}/>
           <Field label="Interest Rate" value={i.rate} onChange={s("rate")} suffix="%" step={0.125}/>
           <Field label="Loan Term" value={i.term} onChange={s("term")} suffix="yr" step={5}/>
@@ -834,7 +840,7 @@ function RentalCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro}) 
         <Divider label="Income"/>
         <Field label="Monthly Rent" value={i.rent} onChange={s("rent")} prefix="$" step={50}/>
         <Divider label="Expenses (monthly)"/>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+        <div className="field-grid-2" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
           <Field label="Taxes" value={i.taxes} onChange={s("taxes")} prefix="$" step={25}/>
           <Field label="Insurance" value={i.insurance} onChange={s("insurance")} prefix="$" step={10}/>
           <Field label="Vacancy" value={i.vacancy} onChange={s("vacancy")} prefix="$" step={25}/>
@@ -869,7 +875,7 @@ function RentalCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro}) 
           <div style={{fontSize:20,fontWeight:800,fontFamily:"'DM Mono',monospace",color:"#059669"}}>{fmtD(c.mortgagePmt)}<span style={{fontSize:11,color:"#9ca3af",fontWeight:400}}>/mo</span></div>
         </div>
 
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+        <div className="results-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
           <BigResult label="Monthly Cash Flow" value={fmtD(c.mcf)} positive={c.mcf>=0} negative={c.mcf<0}/>
           <BigResult label="Cash-on-Cash ROI" value={fmtP(c.coc)} positive={c.coc>=0.08} negative={c.coc<0}/>
         </div>
@@ -1118,7 +1124,7 @@ function FlipCalc({saved,onCalcChange,isPro:isProProp,onActivatePro}) {
 
         {financing!=="cash"&&(<>
           <Divider label="Financing Costs"/>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+          <div className="field-grid-2" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
             <Field label="Interest Rate" value={i.rate} onChange={s("rate")} suffix="%" step={0.5}/>
             <Field label="Points" value={i.points} onChange={s("points")} suffix="pts" step={0.5}/>
             <Field label="Down Payment" value={i.downPct} onChange={s("downPct")} suffix="%" step={5}/>
@@ -1130,7 +1136,7 @@ function FlipCalc({saved,onCalcChange,isPro:isProProp,onActivatePro}) {
         <Field label="Closing Costs" value={i.closing} onChange={s("closing")} prefix="$" step={500}/>
 
         <Divider label="Monthly Holding Costs"/>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+        <div className="field-grid-2" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
           <Field label="Taxes/mo" value={i.taxesMo} onChange={s("taxesMo")} prefix="$" step={50}/>
           <Field label="Insurance/mo" value={i.insuranceMo} onChange={s("insuranceMo")} prefix="$" step={25}/>
           <Field label="Utilities/mo" value={i.utilitiesMo} onChange={s("utilitiesMo")} prefix="$" step={25}/>
@@ -1247,13 +1253,13 @@ function BRRRRCalc({saved,onCalcChange,isPro:isProProp,onActivatePro}) {
         <Field label="Purchase Price" value={i.pp} onChange={s("pp")} prefix="$" step={5000}/>
         <Field label="Rehab Costs" value={i.rehab} onChange={s("rehab")} prefix="$" step={1000}/>
         <Field label="ARV" value={i.arv} onChange={s("arv")} prefix="$" step={5000}/>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+        <div className="field-grid-2" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
           <Field label="Stabilize Months" value={i.stabilizeMonths} onChange={s("stabilizeMonths")} suffix="mo" step={1}/>
           <Field label="Holding Cost/mo" value={i.holdingMo} onChange={s("holdingMo")} prefix="$" step={100}/>
         </div>
         <Divider label="Refinance Terms"/>
         <Field label="Refinance LTV" value={i.refPct} onChange={s("refPct")} suffix="%" step={1}/>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+        <div className="field-grid-2" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
           <Field label="Refi Rate" value={i.refiRate} onChange={s("refiRate")} suffix="%" step={0.125}/>
           <Field label="Refi Term" value={i.refiTerm} onChange={s("refiTerm")} suffix="yr" step={5}/>
           <Field label="Points" value={i.refiPoints} onChange={s("refiPoints")} suffix="pts" step={0.5}/>
@@ -1262,7 +1268,7 @@ function BRRRRCalc({saved,onCalcChange,isPro:isProProp,onActivatePro}) {
         <Divider label="Rental Income"/>
         <Field label="Monthly Rent" value={i.rent} onChange={s("rent")} prefix="$" step={50}/>
         <Divider label="Expenses (monthly)"/>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+        <div className="field-grid-2" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
           <Field label="Taxes" value={i.taxes} onChange={s("taxes")} prefix="$" step={25}/>
           <Field label="Insurance" value={i.insurance} onChange={s("insurance")} prefix="$" step={10}/>
           <Field label="Vacancy" value={i.vacancy} onChange={s("vacancy")} prefix="$" step={25}/>
@@ -1408,7 +1414,7 @@ function SubToCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro}) {
       <div style={{display:"flex",flexDirection:"column",gap:10}}>
         <Divider label="Existing Loan"/>
         <Field label="Loan Balance" value={i.balance} onChange={s("balance")} prefix="$" step={5000}/>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+        <div className="field-grid-2" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
           <Field label="Interest Rate" value={i.rate} onChange={s("rate")} suffix="%" step={0.125}/>
           <Field label="Years Remaining" value={i.yearsLeft} onChange={s("yearsLeft")} suffix="yr" step={1}/>
         </div>
@@ -1420,7 +1426,7 @@ function SubToCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro}) {
         <Divider label="Income"/>
         <Field label="Monthly Rent" value={i.rent} onChange={s("rent")} prefix="$" step={50}/>
         <Divider label="Expenses (monthly)"/>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+        <div className="field-grid-2" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
           <Field label="Taxes" value={i.taxes} onChange={s("taxes")} prefix="$" step={25}/>
           <Field label="Insurance" value={i.insurance} onChange={s("insurance")} prefix="$" step={10}/>
           <Field label="Maintenance" value={i.maintenance} onChange={s("maintenance")} prefix="$" step={25}/>
@@ -1434,7 +1440,7 @@ function SubToCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro}) {
           ))}
         </div>
         {exitPlan!=="hold"&&(
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+          <div className="field-grid-2" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
             <Field label="Exit in (years)" value={i.exitYears} onChange={s("exitYears")} suffix="yr" step={1}/>
             <Field label="Appreciation %" value={i.appreciation} onChange={s("appreciation")} suffix="%" step={0.5}/>
           </div>
@@ -1582,7 +1588,7 @@ function NovationCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro}
         <Field label="Seller Payout Amount" value={i.sellerPayout} onChange={s("sellerPayout")} prefix="$" step={1000}/>
 
         <Divider label="Monthly Holding Costs"/>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+        <div className="field-grid-2" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
           <Field label="Taxes/mo" value={i.taxesMo} onChange={s("taxesMo")} prefix="$" step={50}/>
           <Field label="Insurance/mo" value={i.insuranceMo} onChange={s("insuranceMo")} prefix="$" step={25}/>
           <Field label="Utilities/mo" value={i.utilitiesMo} onChange={s("utilitiesMo")} prefix="$" step={25}/>
@@ -3399,28 +3405,49 @@ const DEMO={
 // ─── Landing Page ──────────────────────────────────────────────────────────────
 function LandingPage({onGoSignIn,onGoSignUp}) {
   const [mode,setMode]=useState("rental");const [scrolled,setScrolled]=useState(false);
+  const [mobileMenu,setMobileMenu]=useState(false);
   const active=MODES.find(m=>m.key===mode);const data=DEMO[mode];
   useEffect(()=>{const h=()=>setScrolled(window.scrollY>50);window.addEventListener("scroll",h);return()=>window.removeEventListener("scroll",h);},[]);
   return (
     <div style={{fontFamily:"'DM Sans',sans-serif",background:"#fff",color:"#111827"}}>
-      <nav style={{position:"fixed",top:0,left:0,right:0,zIndex:200,transition:"all 0.25s",background:scrolled?"rgba(255,255,255,0.97)":"transparent",backdropFilter:scrolled?"blur(12px)":"none",borderBottom:scrolled?"1px solid #e5e7eb":"none"}}>
-        <div style={{maxWidth:1140,margin:"0 auto",display:"flex",alignItems:"center",justifyContent:"space-between",height:60,padding:"0 32px"}}>
+      <nav style={{position:"fixed",top:0,left:0,right:0,zIndex:200,transition:"all 0.25s",background:scrolled||mobileMenu?"rgba(255,255,255,0.97)":"transparent",backdropFilter:"blur(12px)",borderBottom:scrolled||mobileMenu?"1px solid #e5e7eb":"none"}}>
+        <div style={{maxWidth:1140,margin:"0 auto",display:"flex",alignItems:"center",justifyContent:"space-between",height:60,padding:"0 20px"}}>
           <Logo/>
-          <div style={{display:"flex",gap:24}}>
+          {/* Desktop nav links */}
+          <div style={{display:"flex",gap:24}} className="hide-mobile">
             {["Features","Community","Mentoring","Pricing"].map(l=>(
               <button key={l} onClick={()=>{const el=document.getElementById(l.toLowerCase());if(el)el.scrollIntoView({behavior:"smooth",block:"start"});}} style={{background:"none",border:"none",fontSize:14,color:"#6b7280",fontWeight:500,cursor:"pointer",padding:0}}>{l}</button>
             ))}
           </div>
-          <div style={{display:"flex",gap:10}}>
+          {/* Desktop CTA buttons */}
+          <div style={{display:"flex",gap:10}} className="hide-mobile">
             <button onClick={onGoSignIn} style={{padding:"8px 18px",borderRadius:8,border:"1.5px solid #e5e7eb",background:"white",color:"#374151",fontSize:13,fontWeight:500,cursor:"pointer"}}>Sign In</button>
             <button onClick={onGoSignUp} style={{padding:"8px 18px",borderRadius:8,border:"none",background:"#111827",color:"white",fontSize:13,fontWeight:600,cursor:"pointer"}}>Start Free Trial</button>
           </div>
+          {/* Mobile: Sign in + Hamburger */}
+          <div style={{display:"none",gap:8,alignItems:"center"}} className="show-mobile">
+            <button onClick={onGoSignIn} style={{padding:"7px 14px",borderRadius:8,border:"1.5px solid #e5e7eb",background:"white",color:"#374151",fontSize:12,fontWeight:500,cursor:"pointer"}}>Sign In</button>
+            <button onClick={()=>setMobileMenu(m=>!m)} style={{width:38,height:38,borderRadius:8,border:"1.5px solid #e5e7eb",background:"white",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:4}}>
+              <span style={{width:16,height:2,background:"#374151",borderRadius:1,display:"block",transition:"all 0.2s",transform:mobileMenu?"rotate(45deg) translateY(6px)":"none"}}/>
+              <span style={{width:16,height:2,background:"#374151",borderRadius:1,display:"block",opacity:mobileMenu?0:1,transition:"opacity 0.2s"}}/>
+              <span style={{width:16,height:2,background:"#374151",borderRadius:1,display:"block",transition:"all 0.2s",transform:mobileMenu?"rotate(-45deg) translateY(-6px)":"none"}}/>
+            </button>
+          </div>
         </div>
+        {/* Mobile dropdown menu */}
+        {mobileMenu&&(
+          <div style={{background:"white",borderTop:"1px solid #f3f4f6",padding:"16px 20px",display:"flex",flexDirection:"column",gap:4}}>
+            {["Features","Community","Mentoring","Pricing"].map(l=>(
+              <button key={l} onClick={()=>{setMobileMenu(false);const el=document.getElementById(l.toLowerCase());if(el)el.scrollIntoView({behavior:"smooth",block:"start"});}} style={{background:"none",border:"none",fontSize:15,color:"#374151",fontWeight:500,cursor:"pointer",padding:"10px 0",textAlign:"left",borderBottom:"1px solid #f9fafb"}}>{l}</button>
+            ))}
+            <button onClick={onGoSignUp} style={{marginTop:8,padding:"12px",borderRadius:10,border:"none",background:"#10b981",color:"white",fontSize:14,fontWeight:700,cursor:"pointer"}}>Start Free Trial →</button>
+          </div>
+        )}
       </nav>
 
       {/* Hero */}
-      <section style={{paddingTop:80,background:"linear-gradient(180deg,#f0fdf4 0%,#fafafa 55%,#fff 100%)"}}>
-        <div style={{maxWidth:1140,margin:"0 auto",padding:"52px 32px 0"}}>
+      <section style={{paddingTop:72,background:"linear-gradient(180deg,#f0fdf4 0%,#fafafa 55%,#fff 100%)"}}>
+        <div style={{maxWidth:1140,margin:"0 auto",padding:"40px 20px 0"}}>
           <div style={{textAlign:"center",marginBottom:44}}>
             <div style={{display:"inline-flex",alignItems:"center",gap:8,background:"#f0fdf4",border:"1.5px solid #bbf7d0",borderRadius:100,padding:"5px 16px",marginBottom:22}}>
               <span style={{width:7,height:7,borderRadius:"50%",background:"#10b981",display:"inline-block",boxShadow:"0 0 0 3px rgba(16,185,129,0.2)"}}/>
@@ -3557,8 +3584,8 @@ function LandingPage({onGoSignIn,onGoSignUp}) {
       </section>
 
       {/* Mentoring preview */}
-      <section id="mentoring" style={{padding:"88px 32px",background:"#f9fafb",borderTop:"1px solid #e5e7eb"}}>
-        <div style={{maxWidth:1100,margin:"0 auto",display:"grid",gridTemplateColumns:"1fr 1fr",gap:60,alignItems:"center"}}>
+      <section id="mentoring" style={{padding:"60px 20px",background:"#f9fafb",borderTop:"1px solid #e5e7eb"}}>
+        <div className="mentoring-grid" style={{maxWidth:1100,margin:"0 auto",display:"grid",gridTemplateColumns:"1fr 1fr",gap:48,alignItems:"center"}}>
           <div>
             <p style={{fontSize:11,fontWeight:700,letterSpacing:"0.12em",color:"#10b981",textTransform:"uppercase",marginBottom:12}}>Mentoring</p>
             <h2 style={{fontFamily:"'Fraunces',serif",fontSize:"clamp(26px,4vw,40px)",fontWeight:800,color:"#111827",lineHeight:1.15,marginBottom:16}}>Learn directly from verified top investors</h2>
@@ -3885,4 +3912,5 @@ export default function Root() {
     {page==="profile"&&user&&<ProfilePage user={user} profile={profile} onUpdate={handleProfileUpdate} onSignOut={handleSignOut} onBack={()=>setPage("app")}/>}
   </>);
 }
+
 
