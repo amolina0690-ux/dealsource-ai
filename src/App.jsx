@@ -515,236 +515,645 @@ function ProGate({isPro, trigger="unlock", onActivatePro, children}) {
 }
 
 // ─── RISK SCORE ENGINE ─────────────────────────────────────────────────────────
-function calcRiskScore(metrics, strategy) {
+// ─── DECISION ENGINE v3 ────────────────────────────────────────────────────────
+
+// ── Mortgage helper ──
+function calcMortgage(principal, rate, termYears) {
+  const r = rate/100/12, n = termYears*12;
+  if(r===0||n===0) return principal/Math.max(n,1);
+  return principal*(r*Math.pow(1+r,n))/(Math.pow(1+r,n)-1);
+}
+
+// ── Loan balance at year Y ──
+function loanBalance(principal, rate, termYears, yearsPaid) {
+  const r = rate/100/12, n = termYears*12, p = Math.min(yearsPaid*12, n);
+  if(r===0) return Math.max(0, principal*(1-p/n));
+  return principal*(Math.pow(1+r,n)-Math.pow(1+r,p))/(Math.pow(1+r,n)-1);
+}
+
+// ── IRR via Newton-Raphson ──
+function calcIRR(cashflows) {
+  let rate = 0.1;
+  for(let iter=0; iter<100; iter++) {
+    let npv=0, dnpv=0;
+    cashflows.forEach((cf,t)=>{ npv+=cf/Math.pow(1+rate,t); dnpv+=-t*cf/Math.pow(1+rate,t+1); });
+    if(Math.abs(dnpv)<1e-10) break;
+    const nr = rate - npv/dnpv;
+    if(Math.abs(nr-rate)<0.0001) { rate=nr; break; }
+    rate = nr;
+  }
+  return isFinite(rate)?rate:null;
+}
+
+// ── STRATEGY-WEIGHTED RISK SCORE ──
+function calcRiskScore(metrics, strategy, strategyFit="cashflow") {
   let score = 0;
-  const flags = [];
+  const flags = [];   // {label, severity, cause}
   const strengths = [];
 
+  const WEIGHTS = {
+    cashflow:     {coc:0.30, dscr:0.25, mcf:0.20, beo:0.15, ltv:0.10},
+    appreciation: {coc:0.10, dscr:0.15, mcf:0.10, beo:0.10, ltv:0.15, equity:0.40},
+    brrrr:        {coc:0.15, dscr:0.20, mcf:0.15, beo:0.15, ltv:0.35},
+    conservative: {coc:0.15, dscr:0.30, mcf:0.25, beo:0.20, ltv:0.10},
+    aggressive:   {coc:0.35, dscr:0.15, mcf:0.20, beo:0.15, ltv:0.15},
+  };
+  const w = WEIGHTS[strategyFit] || WEIGHTS.cashflow;
+
   if(strategy==="rental"||strategy==="brrrr"||strategy==="subto") {
-    const {mcf=0, coc=0, dscr=0, ltv=0, beo=0} = metrics;
-    // Margin of safety (MCF)
-    if(mcf>=500){score+=20;strengths.push("Strong cash flow buffer");}
-    else if(mcf>=200){score+=12;}
-    else if(mcf>=0){score+=5;flags.push("Thin cash flow margin");}
-    else{score+=0;flags.push("Negative cash flow — high risk");}
+    const {mcf=0,coc=0,dscr=0,beo=0,ltv=0,rent=0,expenses=0,mortgage=0,pp=0,rate=7.5} = metrics;
+
     // CoC
-    if(coc>=0.12){score+=20;strengths.push("Excellent CoC return");}
-    else if(coc>=0.08){score+=14;}
-    else if(coc>=0.04){score+=7;flags.push("Below-average CoC");}
-    else{flags.push("Poor return on capital");}
+    const cocPts = coc>=0.12?100:coc>=0.08?75:coc>=0.04?45:coc>=0?20:0;
+    score += cocPts * w.coc;
+    if(coc>=0.10) strengths.push("Strong CoC return");
+    else if(coc<0.04) flags.push({label:`CoC ${fmtP(coc)}`,severity:"High",cause:"Return too low for risk taken"});
+    else if(coc<0.08) flags.push({label:`CoC ${fmtP(coc)}`,severity:"Moderate",cause:"Below institutional benchmark"});
+
     // DSCR
-    if(dscr>=1.5){score+=20;strengths.push("Debt well-covered");}
-    else if(dscr>=1.35){score+=15;}
-    else if(dscr>=1.2){score+=8;flags.push("DSCR near lender minimum");}
-    else{flags.push("DSCR below 1.2 — lender risk");}
-    // LTV / Break-even
-    if(beo<=0.75){score+=20;strengths.push("Low break-even occupancy");}
-    else if(beo<=0.85){score+=12;}
-    else{score+=4;flags.push("High break-even occupancy");}
-    // Capital efficiency
-    if(ltv>0&&ltv<=0.7){score+=20;strengths.push("Conservative leverage");}
-    else if(ltv<=0.8){score+=12;}
-    else{score+=4;flags.push("High leverage exposure");}
+    const dscrPts = dscr>=1.5?100:dscr>=1.35?80:dscr>=1.2?55:dscr>=1.0?30:0;
+    score += dscrPts * w.dscr;
+    if(dscr>=1.4) strengths.push("Debt well-covered");
+    else if(dscr<1.0) flags.push({label:`DSCR ${dscr.toFixed(2)}x`,severity:"Critical",cause:`High leverage at ${rate}% rate`});
+    else if(dscr<1.2) flags.push({label:`DSCR ${dscr.toFixed(2)}x`,severity:"Moderate",cause:"Near lender minimum — refi risk"});
+
+    // Cash flow buffer
+    const mcfPts = mcf>=500?100:mcf>=200?75:mcf>=0?40:0;
+    score += mcfPts * w.mcf;
+    if(mcf>=400) strengths.push("Healthy cash flow buffer");
+    else if(mcf<0) flags.push({label:`Cash flow ${fmtD(mcf)}/mo`,severity:"High",cause:"Mgmt + capex drag exceeds rent"});
+    else if(mcf<100) flags.push({label:`Cash flow ${fmtD(mcf)}/mo`,severity:"Moderate",cause:"Thin margin — 1 repair wipes buffer"});
+
+    // Break-even occupancy
+    const beoPts = beo<=0.75?100:beo<=0.85?70:beo<=0.95?40:10;
+    score += beoPts * w.beo;
+    if(beo<=0.80) strengths.push("Low break-even occupancy");
+    else if(beo>=1.0) flags.push({label:`Break-even ${fmtP(beo)}`,severity:"Structural",cause:"Taxes/expenses high vs market rent"});
+    else if(beo>=0.90) flags.push({label:`Break-even ${fmtP(beo)}`,severity:"Moderate",cause:"Vulnerable to vacancy spikes"});
+
+    // LTV
+    const ltvPts = ltv<=0.65?100:ltv<=0.75?70:ltv<=0.80?45:20;
+    score += ltvPts * w.ltv;
+    if(ltv<=0.70) strengths.push("Conservative leverage");
+    else if(ltv>=0.85) flags.push({label:`LTV ${fmtP(ltv)}`,severity:"High",cause:"Limited equity cushion"});
+
+    // Equity appreciation (only for appreciation-focused)
+    if(w.equity) score += 60 * w.equity; // base equity score
   }
 
   if(strategy==="wholesale") {
-    const {mao=0, arv=0, repairs=0, fee=0} = metrics;
-    const spread = arv - mao;
-    const margin = arv>0?spread/arv:0;
-    const repairBuffer = arv>0?repairs/arv:0;
-    if(margin>=0.35){score+=25;strengths.push("Strong deal spread");}
-    else if(margin>=0.25){score+=15;}
-    else if(margin>=0.15){score+=8;flags.push("Thin spread — risky");}
-    else{flags.push("Spread too thin");}
-    if(repairBuffer<=0.12){score+=25;strengths.push("Low repair ratio");}
-    else if(repairBuffer<=0.2){score+=15;}
-    else{score+=5;flags.push("High repair-to-ARV ratio");}
-    if(fee>=8000){score+=25;strengths.push("Solid assignment fee");}
-    else if(fee>=4000){score+=15;}
-    else{score+=5;flags.push("Low assignment fee");}
-    score+=25; // base for wholesale simplicity
+    const {mao=0,arv=0,repairs=0,fee=0} = metrics;
+    const spread=arv-mao, margin=arv>0?spread/arv:0, repRatio=arv>0?repairs/arv:0;
+    if(margin>=0.35){score+=88;strengths.push("Strong deal spread");}
+    else if(margin>=0.25){score+=70;}
+    else if(margin>=0.15){score+=45;flags.push({label:"Thin spread",severity:"High",cause:"< 25% margin — buyer resistance likely"});}
+    else{flags.push({label:"Spread too thin",severity:"Critical",cause:"ARV-repair-fee math doesn't work"});}
+    if(repRatio<=0.12){score+=12;strengths.push("Low repair ratio");}
+    else if(repRatio>=0.2){flags.push({label:"High repair ratio",severity:"Moderate",cause:"Repairs eat into investor margin"});}
+    if(fee>=8000) strengths.push("Solid assignment fee");
+    else if(fee<4000) flags.push({label:"Low fee",severity:"Moderate",cause:"Assignment fee below market rate"});
   }
 
   if(strategy==="flip"||strategy==="novation") {
-    const {profit=0, arv=0, roi=0, months=6} = metrics;
-    const margin = arv>0?profit/arv:0;
-    if(margin>=0.2){score+=25;strengths.push("Strong profit margin");}
-    else if(margin>=0.15){score+=18;}
-    else if(margin>=0.1){score+=10;flags.push("Thin margin");}
-    else{flags.push("Margin below 10% — high risk");}
-    if(roi>=0.3){score+=25;strengths.push("Excellent annualized ROI");}
-    else if(roi>=0.2){score+=18;}
-    else if(roi>=0.1){score+=10;}
-    else{flags.push("Low ROI for risk taken");}
-    if(months<=4){score+=25;strengths.push("Short hold = lower risk");}
-    else if(months<=6){score+=18;}
-    else if(months<=9){score+=10;flags.push("Extended hold increases risk");}
-    else{flags.push("Long hold — high carrying cost risk");}
-    score+=25; // base
+    const {profit=0,arv=0,roi=0,months=6,costs=0} = metrics;
+    const margin=arv>0?profit/arv:0;
+    if(margin>=0.20){score+=80;strengths.push("Strong profit margin");}
+    else if(margin>=0.15){score+=62;}
+    else if(margin>=0.10){score+=40;flags.push({label:`Margin ${fmtP(margin)}`,severity:"Moderate",cause:"Thin margin leaves no ARV buffer"});}
+    else{flags.push({label:`Margin ${fmtP(margin)}`,severity:"High",cause:"< 10% — one surprise kills profit"});}
+    if(roi>=0.30){score+=15;strengths.push("Excellent annualized ROI");}
+    else if(roi<0.15){flags.push({label:`ROI ${fmtP(roi)}`,severity:"Moderate",cause:"Below 15% annualized threshold"});}
+    if(months<=4){score+=5;strengths.push("Short hold = lower risk");}
+    else if(months>=9){flags.push({label:`Hold ${months}mo`,severity:"High",cause:"Extended carry cost exposure"});}
   }
 
   score = Math.min(100, Math.max(0, Math.round(score)));
-  let grade, gradeColor, verdict, verdictBg, verdictColor;
-  if(score>=85){grade="A";gradeColor="#059669";verdict="Strong Buy";verdictBg="#f0fdf4";verdictColor="#059669";}
-  else if(score>=70){grade="B";gradeColor="#2563eb";verdict="Proceed";verdictBg="#eff6ff";verdictColor="#2563eb";}
-  else if(score>=55){grade="C";gradeColor="#d97706";verdict="Caution";verdictBg="#fffbeb";verdictColor="#d97706";}
-  else if(score>=35){grade="D";gradeColor="#ea580c";verdict="High Risk";verdictBg="#fff7ed";verdictColor="#ea580c";}
-  else{grade="F";gradeColor="#dc2626";verdict="Avoid";verdictBg="#fef2f2";verdictColor="#dc2626";}
+  const confidence = Math.min(95, 55 + Math.abs(score-50)*0.8);
 
-  return{score,grade,gradeColor,verdict,verdictBg,verdictColor,flags,strengths};
+  let grade, gradeColor, verdict, verdictBg, verdictColor, explanation;
+  if(score>=85){grade="A";gradeColor="#059669";verdict="Strong Buy";verdictBg="#f0fdf4";verdictColor="#059669";explanation="Strong fundamentals across all key metrics. This deal performs well under the selected strategy.";}
+  else if(score>=70){grade="B";gradeColor="#2563eb";verdict="Proceed";verdictBg="#eff6ff";verdictColor="#2563eb";explanation="Solid deal with minor weaknesses. Review flagged items before committing.";}
+  else if(score>=55){grade="C";gradeColor="#d97706";verdict="Weak Hold";verdictBg="#fffbeb";verdictColor="#d97706";explanation="Marginal deal. Thin cushions and moderate leverage reduce safety margin.";}
+  else if(score>=35){grade="D";gradeColor="#ea580c";verdict="High Risk";verdictBg="#fff7ed";verdictColor="#ea580c";explanation="Multiple structural weaknesses. This deal needs significant renegotiation.";}
+  else{grade="F";gradeColor="#dc2626";verdict="Avoid";verdictBg="#fef2f2";verdictColor="#dc2626";explanation="Deal does not meet minimum investment criteria under any scenario.";}
+
+  return{score,grade,gradeColor,verdict,verdictBg,verdictColor,flags,strengths,confidence:Math.round(confidence),explanation};
 }
 
-// ─── STRESS TEST ENGINE ────────────────────────────────────────────────────────
-function StressTest({metrics, strategy, isPro}) {
-  const scenarios = useMemo(()=>{
-    if(strategy==="rental"||strategy==="brrrr"||strategy==="subto") {
-      const {rent=0, expenses=0, mortgage=0, pp=0} = metrics;
-      const base = rent-expenses-mortgage;
-      return [
-        {label:"Base Case",        mcf:base,            change:"",        color:"#374151"},
-        {label:"Rent −5%",         mcf:(rent*0.95)-expenses-mortgage, change:"-5% rent",  color:"#d97706"},
-        {label:"Rent −10%",        mcf:(rent*0.9)-expenses-mortgage,  change:"-10% rent", color:"#dc2626"},
-        {label:"Rate +1%",         mcf:base-(metrics.pp||0)*0.01/12,  change:"+1% rate",  color:"#d97706"},
-        {label:"Rate +2%",         mcf:base-(metrics.pp||0)*0.02/12,  change:"+2% rate",  color:"#dc2626"},
-        {label:"Vacancy 15%",      mcf:(rent*0.85)-expenses-mortgage, change:"15% vacancy",color:"#dc2626"},
-        {label:"Expenses +15%",    mcf:rent-(expenses*1.15)-mortgage, change:"+15% exp",  color:"#d97706"},
-        {label:"Worst Case",       mcf:(rent*0.85)-(expenses*1.15)-mortgage-(metrics.pp||0)*0.01/12, change:"Combined", color:"#dc2626"},
-      ];
-    }
-    if(strategy==="flip"||strategy==="novation") {
-      const {profit=0, arv=0, costs=0} = metrics;
-      return [
-        {label:"Base Case",   profit,              arv,    color:"#374151"},
-        {label:"ARV −3%",     profit:profit-(arv*0.03), arv:arv*0.97, color:"#d97706"},
-        {label:"ARV −5%",     profit:profit-(arv*0.05), arv:arv*0.95, color:"#dc2626"},
-        {label:"ARV −10%",    profit:profit-(arv*0.1),  arv:arv*0.9,  color:"#dc2626"},
-        {label:"Costs +10%",  profit:profit-(costs*0.1), arv,         color:"#d97706"},
-        {label:"Hold +3mo",   profit:profit-(metrics.holdingMoCost||0)*3, arv, color:"#d97706"},
-        {label:"Worst Case",  profit:profit-(arv*0.05)-(costs*0.1)-(metrics.holdingMoCost||0)*3, arv:arv*0.95, color:"#dc2626"},
-      ];
-    }
-    if(strategy==="wholesale") {
-      const {mao=0, arv=0, fee=0} = metrics;
-      return [
-        {label:"Base Case", fee, mao, arv, color:"#374151"},
-        {label:"ARV −3%",   fee:fee-(arv*0.03), mao:mao-(arv*0.03), arv:arv*0.97, color:"#d97706"},
-        {label:"ARV −5%",   fee:fee-(arv*0.05), mao:mao-(arv*0.05), arv:arv*0.95, color:"#dc2626"},
-        {label:"Repairs +20%", fee:fee-(metrics.repairs||0)*0.2, mao, arv, color:"#d97706"},
-        {label:"Worst Case", fee:fee-(arv*0.05)-(metrics.repairs||0)*0.2, mao:mao-(arv*0.05), arv:arv*0.95, color:"#dc2626"},
-      ];
-    }
-    return [];
-  },[metrics,strategy]);
+// ── FIX THE DEAL — reverse engineer targets ──
+function calcFixTheDeal(metrics, strategy) {
+  if(strategy!=="rental"&&strategy!=="brrrr"&&strategy!=="subto") return null;
+  const {mcf=0,coc=0,dscr=0,rent=0,expenses=0,mortgage=0,pp=0,ti=0,rate=7.5,term=30,down=20} = metrics;
+  const fixes = [];
 
-  const isIncome = strategy==="rental"||strategy==="brrrr"||strategy==="subto";
-  const isFlip = strategy==="flip"||strategy==="novation";
+  // Target: 8% CoC
+  if(coc<0.08 && ti>0) {
+    const targetACF = ti*0.08;
+    const targetMCF = targetACF/12;
+    const targetPP_coc = pp - (targetMCF - mcf)*12/0.08 * (1 - down/100);
+    const targetRent_coc = rent + (targetMCF - mcf);
+    const currentLoan = pp*(1-down/100);
+    const targetDown_coc = down + Math.ceil((targetMCF-mcf)*12/ti*100);
+    fixes.push({
+      goal:"Reach 8% CoC",
+      options:[
+        {label:"Purchase price", value:`≤ ${fmtD(Math.round(targetPP_coc/5000)*5000)}`, icon:"🏷️"},
+        {label:"Monthly rent", value:`≥ ${fmtD(Math.round(targetRent_coc/50)*50)}`, icon:"💰"},
+        {label:"Down payment", value:`≥ ${Math.min(50,Math.round(targetDown_coc))}%`, icon:"📥"},
+      ]
+    });
+  }
 
-  return (
-    <ProGate isPro={isPro} trigger="unlock">
-      <div style={{background:"#f9fafb",borderRadius:12,overflow:"hidden",border:"1.5px solid #e5e7eb"}}>
-        <div style={{padding:"12px 16px",borderBottom:"1px solid #e5e7eb",background:"white",display:"flex",alignItems:"center",gap:8}}>
-          <span style={{fontSize:14}}>📊</span>
-          <span style={{fontSize:12,fontWeight:700,color:"#374151",textTransform:"uppercase",letterSpacing:"0.06em"}}>Stress Test Engine</span>
-        </div>
-        <div style={{padding:"14px 16px"}}>
-          {scenarios.map((s,idx)=>{
-            const val = isIncome?s.mcf:isFlip?s.profit:s.fee;
-            const isBase = idx===0;
-            return (
-              <div key={idx} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 0",borderBottom:idx<scenarios.length-1?"1px solid #f3f4f6":"none"}}>
-                <div style={{display:"flex",alignItems:"center",gap:8}}>
-                  {!isBase&&<span style={{fontSize:11,background:s.color==="#dc2626"?"#fef2f2":"#fffbeb",color:s.color,padding:"1px 7px",borderRadius:100,fontWeight:600,border:`1px solid ${s.color}20`}}>{s.change}</span>}
-                  <span style={{fontSize:12,color:isBase?"#374151":"#6b7280",fontWeight:isBase?700:400}}>{s.label}</span>
-                </div>
-                <div style={{display:"flex",alignItems:"center",gap:8}}>
-                  {!isBase&&val!==undefined&&(()=>{
-                    const base = isIncome?scenarios[0].mcf:isFlip?scenarios[0].profit:scenarios[0].fee;
-                    const diff = val-base;
-                    return <span style={{fontSize:11,color:diff>=0?"#059669":"#dc2626",fontWeight:600}}>{diff>=0?"+":""}{fmtD(diff)}</span>;
-                  })()}
-                  <span style={{fontSize:13,fontWeight:isBase?800:700,fontFamily:"'DM Mono',monospace",color:val>=0?s.color:"#dc2626"}}>{fmtD(val||0)}{isIncome?"/mo":""}</span>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    </ProGate>
-  );
+  // Target: DSCR 1.25
+  if(dscr<1.25 && mortgage>0) {
+    const targetNOI = mortgage*1.25;
+    const targetRent_dscr = targetNOI + expenses;
+    const targetLoan = (rent-expenses)/1.25 / (rate/100/12) * (1 - 1/Math.pow(1+rate/100/12, term*12));
+    fixes.push({
+      goal:"Reach DSCR 1.25",
+      options:[
+        {label:"Monthly rent", value:`≥ ${fmtD(Math.round(targetRent_dscr/50)*50)}`, icon:"💰"},
+        {label:"Max loan", value:`≤ ${fmtD(Math.round(targetLoan/5000)*5000)}`, icon:"🏦"},
+      ]
+    });
+  }
+
+  // Target: $300/mo cash flow
+  if(mcf<300) {
+    const deficit = 300 - mcf;
+    const targetPP_cf = pp - deficit*12/(rate/100) * (1-down/100);
+    const targetRent_cf = rent + deficit;
+    fixes.push({
+      goal:"Get $300/mo cash flow",
+      options:[
+        {label:"Purchase price", value:`≤ ${fmtD(Math.round(Math.max(0,targetPP_cf)/5000)*5000)}`, icon:"🏷️"},
+        {label:"Monthly rent", value:`≥ ${fmtD(Math.round(targetRent_cf/50)*50)}`, icon:"💰"},
+      ]
+    });
+  }
+
+  return fixes.length>0?fixes:null;
 }
 
-// ─── DECISION MODE TAB CONTENT ─────────────────────────────────────────────────
-function DecisionMode({metrics, strategy, isPro}) {
-  const risk = useMemo(()=>calcRiskScore(metrics, strategy),[metrics,strategy]);
+// ── MARGIN OF SAFETY ──
+function calcMarginOfSafety(metrics, strategy) {
+  if(strategy!=="rental"&&strategy!=="brrrr"&&strategy!=="subto") return null;
+  const {pp=0,dscr=0,beo=0,rent=0,rate=7.5,term=30,down=20,appreciation=3} = metrics;
+
+  // 5-yr equity cushion
+  const loan = pp*(1-down/100);
+  const bal5 = loanBalance(loan, rate, term, 5);
+  const val5 = pp*Math.pow(1+appreciation/100,5);
+  const equity5 = val5-bal5;
+  const equityGain = equity5-(pp*down/100);
+
+  // Buy discount estimate (assume market = pp unless we have better data)
+  const buyDiscount = 0.03; // default - user can override
+  const dscrScore = Math.min(100, dscr/1.5*100);
+  const beoScore = Math.max(0, (1-beo)*100);
+  const equityScore = Math.min(100, equityGain/pp*200);
+  const composite = Math.round((dscrScore*0.3 + beoScore*0.4 + equityScore*0.3));
+
+  let label, color;
+  if(composite>=70){label="Strong";color="#059669";}
+  else if(composite>=50){label="Moderate";color="#d97706";}
+  else if(composite>=30){label="Low";color="#ea580c";}
+  else{label="Very Low";color="#dc2626";}
+
+  return{
+    score:composite, label, color,
+    equity5:Math.round(equity5),
+    equityGain:Math.round(equityGain),
+    beo, dscr,
+    buyDiscount,
+  };
+}
+
+// ── LIQUIDITY RISK ──
+function calcLiquidityRisk(metrics, strategy) {
+  if(strategy!=="rental"&&strategy!=="brrrr"&&strategy!=="subto") return null;
+  const {ti=0,mcf=0,pp=0,rate=7.5,term=30,down=20} = metrics;
+  const loan = pp*(1-down/100);
+  const bal5 = loanBalance(loan, rate, term, 5);
+  const principalPaydown5 = loan - bal5;
+  const annualCF = mcf*12;
+  const yearsToRecover = mcf>0 && ti>0 ? Math.ceil(ti/annualCF) : null;
+
+  let riskLevel, riskColor, riskReason;
+  if(mcf<0){riskLevel="Critical";riskColor="#dc2626";riskReason="Negative carry — capital bleeding every month";}
+  else if(yearsToRecover===null||yearsToRecover>20){riskLevel="High";riskColor="#ea580c";riskReason="Capital recovery takes 20+ years via cash flow";}
+  else if(yearsToRecover>12){riskLevel="Moderate";riskColor="#d97706";riskReason="Slow capital recovery — appreciation dependent";}
+  else{riskLevel="Low";riskColor="#059669";riskReason="Cash flow recovers capital within reasonable timeframe";}
+
+  return{
+    capitalRequired:ti,
+    principalPaydown5:Math.round(principalPaydown5),
+    yearsToRecover,
+    annualCF:Math.round(annualCF),
+    riskLevel, riskColor, riskReason,
+  };
+}
+
+// ── MONTE CARLO ENGINE ──
+function runMonteCarlo(metrics, strategy, runs=1000) {
+  if(strategy!=="rental"&&strategy!=="brrrr"&&strategy!=="subto") return null;
+  const {rent=0,expenses=0,mortgage=0,dscr=0} = metrics;
+
+  let negCF=0, dscrBelow1=0, capitalInfusion=0;
+
+  for(let i=0;i<runs;i++) {
+    // Random variance: rent ±15%, vacancy ±10%, expenses ±20%
+    const rentVar  = 1 + (Math.random()-0.5)*0.30;  // ±15%
+    const vacVar   = Math.random()*0.15;              // 0-15% vacancy
+    const expVar   = 1 + (Math.random()-0.5)*0.40;  // ±20%
+    const simRent  = rent*rentVar*(1-vacVar);
+    const simExp   = expenses*expVar;
+    const simMCF   = simRent-simExp-mortgage;
+    const simDSCR  = mortgage>0?(simRent-simExp)/mortgage:0;
+    if(simMCF<0) negCF++;
+    if(simDSCR<1.0) dscrBelow1++;
+    if(simMCF<-200) capitalInfusion++;
+  }
+
+  return{
+    pNegCF:Math.round(negCF/runs*100),
+    pDSCR:Math.round(dscrBelow1/runs*100),
+    pCapInfusion:Math.round(capitalInfusion/runs*100),
+    runs,
+  };
+}
+
+// ── EXIT SCENARIO MODELING ──
+function calcExitScenarios(metrics, strategy) {
+  if(strategy!=="rental"&&strategy!=="brrrr"&&strategy!=="subto") return null;
+  const {pp=0,rent=0,expenses=0,mortgage=0,ti=0,rate=7.5,term=30,down=20,appreciation=3,rentGrowth=2,expenseGrowth=2} = metrics;
+  const loan = pp*(1-down/100);
+
+  const scenarios = [];
+
+  // Helper: build cashflows for IRR
+  const getCFs = (exitYr, salePrice) => {
+    const cfs = [-ti]; // initial investment
+    for(let yr=1;yr<=exitYr;yr++) {
+      const rentY = rent*12*Math.pow(1+rentGrowth/100,yr);
+      const expY  = expenses*12*Math.pow(1+expenseGrowth/100,yr);
+      const cf    = rentY - expY - mortgage*12;
+      cfs.push(cf);
+    }
+    // Add sale proceeds at exit year
+    const bal = loanBalance(loan, rate, term, exitYr);
+    const netProceeds = salePrice - bal - salePrice*0.06; // 6% agent
+    cfs[exitYr] = (cfs[exitYr]||0) + netProceeds;
+    return cfs;
+  };
+
+  // Hold 10 years
+  const val10 = pp*Math.pow(1+appreciation/100,10);
+  const bal10 = loanBalance(loan, rate, term, 10);
+  const cfs10 = getCFs(10, val10);
+  const irr10 = calcIRR(cfs10);
+  const totalCF10 = cfs10.slice(1,11).reduce((a,b)=>a+b,0);
+  scenarios.push({label:"Hold 10 Years",yr:10,value:Math.round(val10),equity:Math.round(val10-bal10),cashReturned:Math.round(totalCF10+(val10-bal10-val10*0.06)),irr:irr10,loanBal:Math.round(bal10),multiple:ti>0?((totalCF10+(val10-bal10-val10*0.06))/ti):0});
+
+  // Sell Year 5
+  const val5 = pp*Math.pow(1+appreciation/100,5);
+  const bal5 = loanBalance(loan, rate, term, 5);
+  const cfs5 = getCFs(5, val5);
+  const irr5 = calcIRR(cfs5);
+  const totalCF5 = cfs5.slice(1,6).reduce((a,b)=>a+b,0);
+  scenarios.push({label:"Sell Year 5",yr:5,value:Math.round(val5),equity:Math.round(val5-bal5),cashReturned:Math.round(totalCF5+(val5-bal5-val5*0.06)),irr:irr5,loanBal:Math.round(bal5),multiple:ti>0?((totalCF5+(val5-bal5-val5*0.06))/ti):0});
+
+  // Refi Year 3
+  const val3 = pp*Math.pow(1+appreciation/100,3);
+  const bal3 = loanBalance(loan, rate, term, 3);
+  const refiLoan = val3*0.75; // 75% LTV refi
+  const cashOut = refiLoan - bal3;
+  const newMortgage = calcMortgage(refiLoan, rate+0.25, 30);
+  const cfs3 = getCFs(3, val3);
+  scenarios.push({label:"Refi Year 3",yr:3,value:Math.round(val3),equity:Math.round(val3-refiLoan),cashReturned:Math.round(Math.max(0,cashOut)),irr:null,loanBal:Math.round(refiLoan),multiple:null,note:`Cash out: ${fmtD(Math.round(Math.max(0,cashOut)))} · New pmt: ${fmtD(Math.round(newMortgage))}/mo`});
+
+  return scenarios;
+}
+
+// ─── DECISION MODE COMPONENTS ──────────────────────────────────────────────────
+const STRATEGY_FIT_OPTIONS = [
+  {key:"cashflow",    label:"Cash Flow",    icon:"💵"},
+  {key:"appreciation",label:"Appreciation", icon:"📈"},
+  {key:"brrrr",       label:"BRRRR",        icon:"♻️"},
+  {key:"conservative",label:"Conservative", icon:"🛡️"},
+  {key:"aggressive",  label:"Aggressive",   icon:"🚀"},
+];
+
+function DecisionMode({metrics, strategy, isPro, onActivatePro, allDeals=[], currentDealId=null}) {
+  const [stratFit, setStratFit] = useState("cashflow");
+  const [activeExit, setActiveExit] = useState(0);
+
+  const risk    = useMemo(()=>calcRiskScore(metrics,strategy,stratFit),[metrics,strategy,stratFit]);
+  const fixes   = useMemo(()=>calcFixTheDeal(metrics,strategy),[metrics,strategy]);
+  const safety  = useMemo(()=>calcMarginOfSafety(metrics,strategy),[metrics,strategy]);
+  const liq     = useMemo(()=>calcLiquidityRisk(metrics,strategy),[metrics,strategy]);
+  const monte   = useMemo(()=>runMonteCarlo(metrics,strategy),[metrics,strategy]);
+  const exits   = useMemo(()=>calcExitScenarios(metrics,strategy),[metrics,strategy]);
+
+  // Portfolio ranking
+  const portfolioRank = useMemo(()=>{
+    if(!allDeals||allDeals.length<2) return null;
+    const rentalDeals = allDeals.filter(d=>["rental","brrrr","subto"].includes(d.mode)&&d.metrics);
+    if(rentalDeals.length<2) return null;
+    const scores = rentalDeals.map(d=>{
+      const coc = parseFloat(d.metrics?.secondary)||0;
+      return{id:d.id, coc, name:d.name};
+    }).sort((a,b)=>b.coc-a.coc);
+    const rank = scores.findIndex(s=>s.id===currentDealId)+1||scores.length;
+    const pct = Math.round(rank/scores.length*100);
+    return{rank, total:scores.length, pct, deals:scores.slice(0,5)};
+  },[allDeals,currentDealId]);
+
+  const isRental = strategy==="rental"||strategy==="brrrr"||strategy==="subto";
 
   return (
-    <div style={{display:"flex",flexDirection:"column",gap:16}}>
-      {/* Risk Score Hero */}
-      <ProGate isPro={isPro} trigger="unlock">
-        <div className="decision-hero" style={{background:"linear-gradient(135deg,#064e3b,#065f46)",borderRadius:16,padding:"22px 24px"}}>
-          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16,flexWrap:"wrap",gap:12}}>
+    <div style={{display:"flex",flexDirection:"column",gap:14}}>
+
+      {/* Strategy Fit Toggle */}
+      <ProGate isPro={isPro} trigger="unlock" onActivatePro={onActivatePro}>
+        <div style={{background:"white",borderRadius:12,border:"1.5px solid #e5e7eb",padding:"14px 16px"}}>
+          <div style={{fontSize:10,fontWeight:700,color:"#9ca3af",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:10}}>Strategy Fit — Weights scoring to your goal</div>
+          <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+            {STRATEGY_FIT_OPTIONS.map(o=>(
+              <button key={o.key} onClick={()=>setStratFit(o.key)}
+                style={{display:"flex",alignItems:"center",gap:5,padding:"6px 12px",borderRadius:100,border:`1.5px solid ${stratFit===o.key?"#059669":"#e5e7eb"}`,background:stratFit===o.key?"#f0fdf4":"white",color:stratFit===o.key?"#059669":"#6b7280",fontSize:11,fontWeight:700,cursor:"pointer",transition:"all 0.15s"}}>
+                <span>{o.icon}</span>{o.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </ProGate>
+
+      {/* CARD 1 — Verdict + Confidence */}
+      <ProGate isPro={isPro} trigger="unlock" onActivatePro={onActivatePro}>
+        <div className="decision-hero" style={{background:"linear-gradient(135deg,#064e3b,#065f46)",borderRadius:16,padding:"20px 22px"}}>
+          <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",marginBottom:14,flexWrap:"wrap",gap:12}}>
             <div>
-              <div style={{fontSize:10,fontWeight:700,color:"rgba(255,255,255,0.5)",textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:4}}>Risk Score</div>
-              <div style={{display:"flex",alignItems:"baseline",gap:10}}>
+              <div style={{fontSize:9,fontWeight:700,color:"rgba(255,255,255,0.45)",textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:6}}>Risk Score · {STRATEGY_FIT_OPTIONS.find(o=>o.key===stratFit)?.label} Strategy</div>
+              <div style={{display:"flex",alignItems:"baseline",gap:8}}>
                 <span className="decision-score" style={{fontSize:52,fontWeight:900,fontFamily:"'DM Mono',monospace",color:risk.grade==="A"?"#6ee7b7":risk.grade==="B"?"#93c5fd":risk.grade==="C"?"#fde68a":risk.grade==="D"?"#fdba74":"#fca5a5",lineHeight:1}}>{risk.score}</span>
-                <span style={{fontSize:16,color:"rgba(255,255,255,0.4)"}}>/100</span>
+                <span style={{fontSize:14,color:"rgba(255,255,255,0.35)"}}>/100</span>
               </div>
+              <div style={{fontSize:11,color:"rgba(255,255,255,0.5)",marginTop:4}}>Confidence: {risk.confidence}%</div>
             </div>
-            <div style={{textAlign:"center"}}>
-              <div style={{width:64,height:64,borderRadius:"50%",background:risk.gradeColor,display:"flex",alignItems:"center",justifyContent:"center",marginBottom:6,boxShadow:`0 0 0 6px ${risk.gradeColor}30`}}>
-                <span style={{fontSize:28,fontWeight:900,color:"white",fontFamily:"'Fraunces',serif"}}>{risk.grade}</span>
-              </div>
-              <div style={{fontSize:10,color:"rgba(255,255,255,0.5)"}}>Grade</div>
-            </div>
-            <div style={{background:risk.verdictBg,borderRadius:12,padding:"10px 18px",border:`1.5px solid ${risk.verdictColor}30`}}>
-              <div style={{fontSize:10,color:"#6b7280",textTransform:"uppercase",fontWeight:700,marginBottom:3}}>Verdict</div>
-              <div style={{fontSize:16,fontWeight:800,color:risk.verdictColor}}>{risk.verdict}</div>
-            </div>
-          </div>
-          {/* Score bar */}
-          <div style={{height:8,background:"rgba(255,255,255,0.1)",borderRadius:4,overflow:"hidden",marginBottom:12}}>
-            <div style={{height:"100%",width:`${risk.score}%`,background:risk.gradeColor,borderRadius:4,transition:"width 0.6s ease"}}/>
-          </div>
-          {/* Flags + strengths */}
-          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-            {risk.strengths.map(s=><span key={s} style={{fontSize:11,background:"rgba(110,231,183,0.15)",color:"#6ee7b7",padding:"3px 10px",borderRadius:100,border:"1px solid rgba(110,231,183,0.3)"}}>✓ {s}</span>)}
-            {risk.flags.map(f=><span key={f} style={{fontSize:11,background:"rgba(252,165,165,0.15)",color:"#fca5a5",padding:"3px 10px",borderRadius:100,border:"1px solid rgba(252,165,165,0.3)"}}>⚠ {f}</span>)}
-          </div>
-        </div>
-      </ProGate>
-
-      {/* Capital Efficiency */}
-      <ProGate isPro={isPro} trigger="unlock">
-        <div style={{background:"white",borderRadius:12,border:"1.5px solid #e5e7eb",padding:"16px 18px"}}>
-          <div style={{fontSize:11,fontWeight:700,color:"#374151",textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:14}}>Capital Efficiency Analysis</div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-            {(()=>{
-              const items = [];
-              if(metrics.coc!==undefined) items.push(["CoC Return",fmtP(metrics.coc),metrics.coc>=0.1?"#059669":metrics.coc>=0.06?"#d97706":"#dc2626"]);
-              if(metrics.dscr!==undefined) items.push(["DSCR",metrics.dscr.toFixed(2)+"x",metrics.dscr>=1.35?"#059669":metrics.dscr>=1.2?"#d97706":"#dc2626"]);
-              if(metrics.mcf!==undefined) items.push(["CF Buffer",fmtD(metrics.mcf)+"/mo",metrics.mcf>=300?"#059669":metrics.mcf>=0?"#d97706":"#dc2626"]);
-              if(metrics.beo!==undefined) items.push(["Break-Even Occ.",fmtP(metrics.beo),metrics.beo<=0.8?"#059669":"#d97706"]);
-              if(metrics.roi!==undefined) items.push(["ROI",fmtP(metrics.roi),metrics.roi>=0.15?"#059669":"#d97706"]);
-              if(metrics.margin!==undefined) items.push(["Profit Margin",fmtP(metrics.margin),metrics.margin>=0.15?"#059669":"#d97706"]);
-              return items.slice(0,6).map(([l,v,c])=>(
-                <div key={l} style={{background:"#f9fafb",borderRadius:10,padding:"10px 12px",border:`1.5px solid ${c}20`}}>
-                  <div style={{fontSize:9,color:"#9ca3af",fontWeight:700,textTransform:"uppercase",marginBottom:4}}>{l}</div>
-                  <div style={{fontSize:16,fontWeight:800,fontFamily:"'DM Mono',monospace",color:c}}>{v}</div>
+            <div style={{display:"flex",gap:10,alignItems:"center"}}>
+              <div style={{textAlign:"center"}}>
+                <div style={{width:58,height:58,borderRadius:"50%",background:risk.gradeColor,display:"flex",alignItems:"center",justifyContent:"center",boxShadow:`0 0 0 5px ${risk.gradeColor}40`}}>
+                  <span style={{fontSize:26,fontWeight:900,color:"white",fontFamily:"'Fraunces',serif"}}>{risk.grade}</span>
                 </div>
-              ));
-            })()}
+                <div style={{fontSize:9,color:"rgba(255,255,255,0.4)",marginTop:4}}>Grade</div>
+              </div>
+              <div style={{background:risk.verdictBg,borderRadius:10,padding:"10px 14px"}}>
+                <div style={{fontSize:9,color:"#9ca3af",textTransform:"uppercase",fontWeight:700,marginBottom:2}}>Verdict</div>
+                <div style={{fontSize:15,fontWeight:800,color:risk.verdictColor}}>{risk.verdict}</div>
+              </div>
+            </div>
+          </div>
+          <div style={{height:6,background:"rgba(255,255,255,0.1)",borderRadius:3,overflow:"hidden",marginBottom:10}}>
+            <div style={{height:"100%",width:`${risk.score}%`,background:risk.gradeColor,borderRadius:3,transition:"width 0.6s ease"}}/>
+          </div>
+          <p style={{fontSize:12,color:"rgba(255,255,255,0.65)",lineHeight:1.6,marginBottom:10}}>{risk.explanation}</p>
+          <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+            {risk.strengths.map(s=><span key={s} style={{fontSize:10,background:"rgba(110,231,183,0.15)",color:"#6ee7b7",padding:"3px 9px",borderRadius:100,border:"1px solid rgba(110,231,183,0.3)"}}>✓ {s}</span>)}
           </div>
         </div>
       </ProGate>
 
-      {/* Stress Test */}
-      <StressTest metrics={metrics} strategy={strategy} isPro={isPro}/>
+      {/* CARD 2 — Risk Diagnosis */}
+      {risk.flags.length>0&&(
+        <ProGate isPro={isPro} trigger="unlock" onActivatePro={onActivatePro}>
+          <div style={{background:"white",borderRadius:12,border:"1.5px solid #e5e7eb",overflow:"hidden"}}>
+            <div style={{padding:"11px 16px",borderBottom:"1px solid #f3f4f6",display:"flex",alignItems:"center",gap:8,background:"#fffbeb"}}>
+              <span style={{fontSize:13}}>🔬</span>
+              <span style={{fontSize:11,fontWeight:700,color:"#92400e",textTransform:"uppercase",letterSpacing:"0.06em"}}>Risk Diagnosis</span>
+            </div>
+            <div style={{overflowX:"auto"}}>
+              <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+                <thead>
+                  <tr style={{background:"#f9fafb"}}>
+                    {["Risk Factor","Severity","Root Cause"].map(h=><th key={h} style={{padding:"8px 14px",textAlign:"left",fontSize:9,fontWeight:700,color:"#9ca3af",textTransform:"uppercase",letterSpacing:"0.06em",whiteSpace:"nowrap"}}>{h}</th>)}
+                  </tr>
+                </thead>
+                <tbody>
+                  {risk.flags.map((f,i)=>{
+                    const sev=f.severity;
+                    const sc=sev==="Critical"?"#dc2626":sev==="High"?"#ea580c":sev==="Structural"?"#7c3aed":"#d97706";
+                    return(
+                      <tr key={i} style={{borderTop:"1px solid #f3f4f6"}}>
+                        <td style={{padding:"10px 14px",fontWeight:700,color:"#374151",whiteSpace:"nowrap"}}>{f.label}</td>
+                        <td style={{padding:"10px 14px"}}><span style={{fontSize:10,background:`${sc}15`,color:sc,padding:"2px 8px",borderRadius:100,fontWeight:700,border:`1px solid ${sc}30`,whiteSpace:"nowrap"}}>{sev}</span></td>
+                        <td style={{padding:"10px 14px",color:"#6b7280",fontSize:11}}>{f.cause}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </ProGate>
+      )}
 
-      {/* Upgrade nudge for free users */}
+      {/* CARD 3 — Fix the Deal */}
+      {fixes&&fixes.length>0&&(
+        <ProGate isPro={isPro} trigger="unlock" onActivatePro={onActivatePro}>
+          <div style={{background:"white",borderRadius:12,border:"1.5px solid #bbf7d0",overflow:"hidden"}}>
+            <div style={{padding:"11px 16px",borderBottom:"1px solid #f0fdf4",display:"flex",alignItems:"center",gap:8,background:"#f0fdf4"}}>
+              <span style={{fontSize:13}}>🔧</span>
+              <span style={{fontSize:11,fontWeight:700,color:"#065f46",textTransform:"uppercase",letterSpacing:"0.06em"}}>Fix the Deal — Reverse Engineer Targets</span>
+            </div>
+            <div style={{padding:"14px 16px",display:"flex",flexDirection:"column",gap:14}}>
+              {fixes.map((fix,fi)=>(
+                <div key={fi}>
+                  <div style={{fontSize:12,fontWeight:700,color:"#374151",marginBottom:8}}>To {fix.goal}:</div>
+                  <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                    {fix.options.map((opt,oi)=>(
+                      <div key={oi} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",background:"#f9fafb",borderRadius:8,border:"1px solid #e5e7eb"}}>
+                        <span style={{fontSize:14}}>{opt.icon}</span>
+                        <span style={{fontSize:12,color:"#6b7280",flex:1}}>{opt.label}</span>
+                        <span style={{fontSize:13,fontWeight:800,fontFamily:"'DM Mono',monospace",color:"#059669"}}>{opt.value}</span>
+                      </div>
+                    ))}
+                  </div>
+                  {fi<fixes.length-1&&<div style={{height:1,background:"#f3f4f6",marginTop:14}}/>}
+                </div>
+              ))}
+            </div>
+          </div>
+        </ProGate>
+      )}
+
+      {/* CARD 4 — Margin of Safety */}
+      {safety&&(
+        <ProGate isPro={isPro} trigger="unlock" onActivatePro={onActivatePro}>
+          <div style={{background:"white",borderRadius:12,border:"1.5px solid #e5e7eb",overflow:"hidden"}}>
+            <div style={{padding:"11px 16px",borderBottom:"1px solid #f3f4f6",display:"flex",alignItems:"center",justifyContent:"space-between",gap:8}}>
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <span style={{fontSize:13}}>🛡️</span>
+                <span style={{fontSize:11,fontWeight:700,color:"#374151",textTransform:"uppercase",letterSpacing:"0.06em"}}>Margin of Safety Index</span>
+              </div>
+              <div style={{display:"flex",alignItems:"center",gap:6}}>
+                <span style={{fontSize:18,fontWeight:900,fontFamily:"'DM Mono',monospace",color:safety.color}}>{safety.score}</span>
+                <span style={{fontSize:11,fontWeight:700,color:safety.color,background:`${safety.color}15`,padding:"2px 8px",borderRadius:100}}>{safety.label}</span>
+              </div>
+            </div>
+            <div style={{padding:"12px 16px",display:"flex",flexDirection:"column",gap:8}}>
+              {[
+                ["5-Year Equity Cushion", fmtD(safety.equityGain), safety.equityGain>50000?"#059669":"#d97706"],
+                ["Total Equity at Yr 5", fmtD(safety.equity5), "#374151"],
+                ["Break-Even Occupancy", fmtP(safety.beo), safety.beo<=0.85?"#059669":"#d97706"],
+                ["DSCR Coverage", safety.dscr.toFixed(2)+"x", safety.dscr>=1.35?"#059669":safety.dscr>=1.2?"#d97706":"#dc2626"],
+              ].map(([l,v,c])=>(
+                <div key={l} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:"1px solid #f9fafb",gap:8}}>
+                  <span style={{fontSize:12,color:"#6b7280",flex:1}}>{l}</span>
+                  <span style={{fontSize:13,fontWeight:700,fontFamily:"'DM Mono',monospace",color:c,flexShrink:0}}>{v}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </ProGate>
+      )}
+
+      {/* CARD 5 — Liquidity Risk */}
+      {liq&&(
+        <ProGate isPro={isPro} trigger="unlock" onActivatePro={onActivatePro}>
+          <div style={{background:"white",borderRadius:12,border:"1.5px solid #e5e7eb",overflow:"hidden"}}>
+            <div style={{padding:"11px 16px",borderBottom:"1px solid #f3f4f6",display:"flex",alignItems:"center",justifyContent:"space-between",gap:8}}>
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <span style={{fontSize:13}}>💧</span>
+                <span style={{fontSize:11,fontWeight:700,color:"#374151",textTransform:"uppercase",letterSpacing:"0.06em"}}>Liquidity Risk</span>
+              </div>
+              <span style={{fontSize:10,fontWeight:700,color:liq.riskColor,background:`${liq.riskColor}15`,padding:"3px 10px",borderRadius:100,border:`1px solid ${liq.riskColor}30`}}>{liq.riskLevel}</span>
+            </div>
+            <div style={{padding:"12px 16px",display:"flex",flexDirection:"column",gap:8}}>
+              {[
+                ["Capital Required",fmtD(liq.capitalRequired),"#374151"],
+                ["5-Yr Principal Paydown",fmtD(liq.principalPaydown5),"#059669"],
+                ["Annual Cash Flow",fmtD(liq.annualCF),liq.annualCF>=0?"#059669":"#dc2626"],
+                ["Years to Recover Capital",liq.yearsToRecover?`${liq.yearsToRecover} yrs`:"Never",liq.yearsToRecover&&liq.yearsToRecover<=15?"#d97706":"#dc2626"],
+              ].map(([l,v,c])=>(
+                <div key={l} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:"1px solid #f9fafb",gap:8}}>
+                  <span style={{fontSize:12,color:"#6b7280",flex:1}}>{l}</span>
+                  <span style={{fontSize:13,fontWeight:700,fontFamily:"'DM Mono',monospace",color:c,flexShrink:0}}>{v}</span>
+                </div>
+              ))}
+              <p style={{fontSize:11,color:liq.riskColor,background:`${liq.riskColor}10`,padding:"8px 10px",borderRadius:8,marginTop:4,fontWeight:600}}>{liq.riskReason}</p>
+            </div>
+          </div>
+        </ProGate>
+      )}
+
+      {/* Monte Carlo Probability Engine */}
+      {monte&&(
+        <ProGate isPro={isPro} trigger="unlock" onActivatePro={onActivatePro}>
+          <div style={{background:"white",borderRadius:12,border:"1.5px solid #e5e7eb",overflow:"hidden"}}>
+            <div style={{padding:"11px 16px",borderBottom:"1px solid #f3f4f6",display:"flex",alignItems:"center",gap:8,background:"#f5f3ff"}}>
+              <span style={{fontSize:13}}>🎲</span>
+              <span style={{fontSize:11,fontWeight:700,color:"#6d28d9",textTransform:"uppercase",letterSpacing:"0.06em"}}>Probability Engine — {monte.runs.toLocaleString()} Simulations</span>
+            </div>
+            <div style={{padding:"14px 16px",display:"flex",flexDirection:"column",gap:10}}>
+              {[
+                {label:"Probability of negative cash flow",pct:monte.pNegCF,danger:50},
+                {label:"Probability DSCR falls below 1.0",pct:monte.pDSCR,danger:40},
+                {label:"Probability of forced capital infusion",pct:monte.pCapInfusion,danger:30},
+              ].map(({label,pct,danger})=>{
+                const c=pct>=danger?"#dc2626":pct>=danger*0.6?"#d97706":"#059669";
+                return(
+                  <div key={label}>
+                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}>
+                      <span style={{fontSize:12,color:"#374151"}}>{label}</span>
+                      <span style={{fontSize:14,fontWeight:800,fontFamily:"'DM Mono',monospace",color:c}}>{pct}%</span>
+                    </div>
+                    <div style={{height:6,background:"#f3f4f6",borderRadius:3,overflow:"hidden"}}>
+                      <div style={{height:"100%",width:`${pct}%`,background:c,borderRadius:3,transition:"width 0.5s ease"}}/>
+                    </div>
+                  </div>
+                );
+              })}
+              <p style={{fontSize:10,color:"#9ca3af",marginTop:4}}>Based on random variance: rent ±15%, vacancy 0-15%, expenses ±20%</p>
+            </div>
+          </div>
+        </ProGate>
+      )}
+
+      {/* Exit Scenarios */}
+      {exits&&exits.length>0&&(
+        <ProGate isPro={isPro} trigger="unlock" onActivatePro={onActivatePro}>
+          <div style={{background:"white",borderRadius:12,border:"1.5px solid #e5e7eb",overflow:"hidden"}}>
+            <div style={{padding:"11px 16px",borderBottom:"1px solid #f3f4f6",display:"flex",alignItems:"center",gap:8}}>
+              <span style={{fontSize:13}}>🚪</span>
+              <span style={{fontSize:11,fontWeight:700,color:"#374151",textTransform:"uppercase",letterSpacing:"0.06em"}}>Exit Scenario Modeling</span>
+            </div>
+            <div style={{display:"flex",gap:0,borderBottom:"1px solid #f3f4f6",overflowX:"auto"}}>
+              {exits.map((e,i)=>(
+                <button key={i} onClick={()=>setActiveExit(i)}
+                  style={{flex:1,padding:"9px 10px",border:"none",borderBottom:`2px solid ${activeExit===i?"#059669":"transparent"}`,background:"transparent",color:activeExit===i?"#059669":"#9ca3af",fontSize:11,fontWeight:activeExit===i?700:500,cursor:"pointer",whiteSpace:"nowrap",minWidth:80}}>
+                  {e.label}
+                </button>
+              ))}
+            </div>
+            <div style={{padding:"14px 16px"}}>
+              {(()=>{
+                const e=exits[activeExit];
+                return(
+                  <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                    {e.note&&<div style={{fontSize:11,color:"#6b7280",background:"#f9fafb",padding:"8px 10px",borderRadius:8,marginBottom:4}}>{e.note}</div>}
+                    {[
+                      ["Property Value",fmtD(e.value),"#374151"],
+                      ["Equity at Exit",fmtD(e.equity),"#7c3aed"],
+                      e.irr!=null?["IRR",`${(e.irr*100).toFixed(1)}%`,e.irr>=0.15?"#059669":"#d97706"]:null,
+                      e.multiple!=null?["Equity Multiple",`${e.multiple.toFixed(2)}x`,e.multiple>=1.5?"#059669":"#d97706"]:null,
+                      ["Cash Returned",fmtD(e.cashReturned),e.cashReturned>0?"#059669":"#dc2626"],
+                      ["Remaining Loan",fmtD(e.loanBal),"#6b7280"],
+                    ].filter(Boolean).map(([l,v,c])=>(
+                      <div key={l} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:"1px solid #f9fafb",gap:8}}>
+                        <span style={{fontSize:12,color:"#6b7280",flex:1}}>{l}</span>
+                        <span style={{fontSize:14,fontWeight:700,fontFamily:"'DM Mono',monospace",color:c,flexShrink:0}}>{v}</span>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+            </div>
+          </div>
+        </ProGate>
+      )}
+
+      {/* Portfolio Ranking */}
+      {portfolioRank&&(
+        <ProGate isPro={isPro} trigger="unlock" onActivatePro={onActivatePro}>
+          <div style={{background:"white",borderRadius:12,border:"1.5px solid #e5e7eb",overflow:"hidden"}}>
+            <div style={{padding:"11px 16px",borderBottom:"1px solid #f3f4f6",display:"flex",alignItems:"center",gap:8}}>
+              <span style={{fontSize:13}}>📊</span>
+              <span style={{fontSize:11,fontWeight:700,color:"#374151",textTransform:"uppercase",letterSpacing:"0.06em"}}>Portfolio Ranking</span>
+            </div>
+            <div style={{padding:"14px 16px"}}>
+              <div style={{display:"flex",gap:10,marginBottom:14,flexWrap:"wrap"}}>
+                <div style={{background:"#f0fdf4",borderRadius:10,padding:"10px 14px",flex:1,minWidth:80,textAlign:"center"}}>
+                  <div style={{fontSize:22,fontWeight:900,fontFamily:"'DM Mono',monospace",color:"#059669"}}>#{portfolioRank.rank}</div>
+                  <div style={{fontSize:10,color:"#6b7280"}}>of {portfolioRank.total} deals</div>
+                </div>
+                <div style={{background:"#f9fafb",borderRadius:10,padding:"10px 14px",flex:2,minWidth:120}}>
+                  <div style={{fontSize:11,fontWeight:600,color:"#374151",marginBottom:2}}>Percentile rank</div>
+                  <div style={{height:6,background:"#e5e7eb",borderRadius:3,overflow:"hidden"}}>
+                    <div style={{height:"100%",width:`${100-portfolioRank.pct}%`,background:"#059669",borderRadius:3}}/>
+                  </div>
+                  <div style={{fontSize:10,color:"#6b7280",marginTop:3}}>Top {100-portfolioRank.pct}% in your portfolio</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </ProGate>
+      )}
+
       {!isPro&&(
         <div style={{textAlign:"center",padding:"16px",background:"#f0fdf4",borderRadius:12,border:"1.5px solid #bbf7d0"}}>
-          <div style={{fontSize:13,fontWeight:700,color:"#059669",marginBottom:4}}>🧠 Decision Intelligence is Pro-only</div>
-          <div style={{fontSize:12,color:"#6b7280",marginBottom:10}}>Risk scores, stress testing, and capital grades update live as you type.</div>
+          <div style={{fontSize:13,fontWeight:700,color:"#059669",marginBottom:4}}>🧠 Full Decision Intelligence — Pro Only</div>
+          <div style={{fontSize:12,color:"#6b7280",marginBottom:10}}>Risk diagnosis, Fix the Deal, Monte Carlo, Exit IRR, Margin of Safety — all live.</div>
           <div style={{fontSize:12,color:"#374151",fontWeight:600}}>$20/mo — cancel anytime</div>
         </div>
       )}
@@ -753,7 +1162,138 @@ function DecisionMode({metrics, strategy, isPro}) {
 }
 
 
-function RentalCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro}) {
+// ─── ADVANCED RENTAL PANEL (Projections + Exit Modeling) ──────────────────────
+function AdvancedRentalPanel({i, s, c, mortgagePmt}) {
+  const [exitTab, setExitTab] = useState("hold10");
+  const loan = +i.pp*(1-+i.down/100);
+
+  const exits = useMemo(()=>{
+    const scenarios = {};
+    // Hold 10
+    const val10=+i.pp*Math.pow(1+(+i.appreciation||3)/100,10);
+    const bal10=loanBalance(loan,+i.rate,+i.term,10);
+    const cfs10=[-c.ti];
+    for(let yr=1;yr<=10;yr++){
+      const rentY=+i.rent*12*Math.pow(1+(+i.rentGrowth||2)/100,yr);
+      const expY=(+i.taxes+ +i.insurance+ +i.vacancy+ +i.repairs+ +i.capex+ +i.mgmt+ +i.utilities+ +i.hoa)*12*Math.pow(1+(+i.expenseGrowth||2)/100,yr);
+      cfs10.push(rentY-expY-mortgagePmt*12);
+    }
+    const saleProc10=val10-bal10-val10*0.06;
+    cfs10[10]=(cfs10[10]||0)+saleProc10;
+    const irr10=calcIRR(cfs10);
+    const totalCF10=cfs10.slice(1,11).reduce((a,b)=>a+b,0);
+    scenarios.hold10={label:"Hold 10 Yrs",value:Math.round(val10),equity:Math.round(val10-bal10),loanBal:Math.round(bal10),cashReturned:Math.round(totalCF10+saleProc10),irr:irr10,multiple:c.ti>0?(totalCF10+saleProc10)/c.ti:0};
+
+    // Sell Year 5
+    const val5=+i.pp*Math.pow(1+(+i.appreciation||3)/100,5);
+    const bal5=loanBalance(loan,+i.rate,+i.term,5);
+    const cfs5=[-c.ti];
+    for(let yr=1;yr<=5;yr++){
+      const rentY=+i.rent*12*Math.pow(1+(+i.rentGrowth||2)/100,yr);
+      const expY=(+i.taxes+ +i.insurance+ +i.vacancy+ +i.repairs+ +i.capex+ +i.mgmt+ +i.utilities+ +i.hoa)*12*Math.pow(1+(+i.expenseGrowth||2)/100,yr);
+      cfs5.push(rentY-expY-mortgagePmt*12);
+    }
+    const saleProc5=val5-bal5-val5*0.06;
+    cfs5[5]=(cfs5[5]||0)+saleProc5;
+    const irr5=calcIRR(cfs5);
+    const totalCF5=cfs5.slice(1,6).reduce((a,b)=>a+b,0);
+    scenarios.sell5={label:"Sell Yr 5",value:Math.round(val5),equity:Math.round(val5-bal5),loanBal:Math.round(bal5),cashReturned:Math.round(totalCF5+saleProc5),irr:irr5,multiple:c.ti>0?(totalCF5+saleProc5)/c.ti:0};
+
+    // Refi Year 3
+    const val3=+i.pp*Math.pow(1+(+i.appreciation||3)/100,3);
+    const bal3=loanBalance(loan,+i.rate,+i.term,3);
+    const refiLoan=val3*0.75;
+    const cashOut=Math.max(0,refiLoan-bal3);
+    const newPmt=calcMortgage(refiLoan,(+i.rate||7.5)+0.25,30);
+    scenarios.refi3={label:"Refi Yr 3",value:Math.round(val3),equity:Math.round(val3-refiLoan),loanBal:Math.round(refiLoan),cashReturned:Math.round(cashOut),irr:null,multiple:null,note:`Cash out: ${fmtD(Math.round(cashOut))} · New pmt: ${fmtD(Math.round(newPmt))}/mo`};
+
+    // BRRRR exit
+    const brrrrRefi=val3*0.75, brrrrCashOut=Math.max(0,brrrrRefi-loan);
+    scenarios.brrrr={label:"BRRRR Exit",value:Math.round(val3),equity:Math.round(val3-brrrrRefi),loanBal:Math.round(brrrrRefi),cashReturned:Math.round(brrrrCashOut),irr:null,multiple:null,note:`Recaptured: ${fmtD(Math.round(brrrrCashOut))} of ${fmtD(Math.round(c.ti))} invested`};
+
+    return scenarios;
+  },[i,c,loan,mortgagePmt]);
+
+  const proj=[1,5,10,15,20,30].map(yr=>{
+    const rentY=+i.rent*Math.pow(1+(+i.rentGrowth||2)/100,yr);
+    const expY=(+i.taxes+ +i.insurance+ +i.vacancy+ +i.repairs+ +i.capex+ +i.mgmt+ +i.utilities+ +i.hoa)*Math.pow(1+(+i.expenseGrowth||2)/100,yr);
+    const valY=+i.pp*Math.pow(1+(+i.appreciation||3)/100,yr);
+    const bal=loanBalance(loan,+i.rate,+i.term,yr);
+    return{yr,rent:Math.round(rentY),val:Math.round(valY),equity:Math.round(valY-bal),mcf:Math.round(rentY-expY-mortgagePmt)};
+  });
+
+  const activeExit=exits[exitTab];
+  const exitTabs=[["hold10","Hold 10yr"],["sell5","Sell Yr 5"],["refi3","Refi Yr 3"],["brrrr","BRRRR"]];
+
+  return(
+    <div style={{display:"flex",flexDirection:"column",gap:14}}>
+      {/* Module A - Growth Assumptions */}
+      <div style={{background:"#f9fafb",borderRadius:12,padding:"14px 16px",border:"1.5px solid #e5e7eb"}}>
+        <div style={{fontSize:10,fontWeight:700,color:"#9ca3af",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:12}}>Module A — Growth Assumptions</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+          <Field label="Appreciation %" value={i.appreciation||3} onChange={s("appreciation")} suffix="%" step={0.5}/>
+          <Field label="Rent Growth %" value={i.rentGrowth||2} onChange={s("rentGrowth")} suffix="%" step={0.5}/>
+          <Field label="Expense Inflation %" value={i.expenseGrowth||2} onChange={s("expenseGrowth")} suffix="%" step={0.5}/>
+        </div>
+      </div>
+
+      {/* Module B - Exit Scenarios */}
+      <div style={{background:"white",borderRadius:12,border:"1.5px solid #e5e7eb",overflow:"hidden"}}>
+        <div style={{padding:"11px 16px",borderBottom:"1px solid #f3f4f6",background:"linear-gradient(135deg,#f0fdf4,#ecfdf5)"}}>
+          <div style={{fontSize:10,fontWeight:700,color:"#059669",textTransform:"uppercase",letterSpacing:"0.08em"}}>Module B — Exit Scenario Modeling</div>
+        </div>
+        <div style={{display:"flex",borderBottom:"1px solid #f3f4f6",overflowX:"auto"}}>
+          {exitTabs.map(([key,label])=>(
+            <button key={key} onClick={()=>setExitTab(key)}
+              style={{flex:1,padding:"9px 8px",border:"none",borderBottom:`2px solid ${exitTab===key?"#059669":"transparent"}`,background:"transparent",color:exitTab===key?"#059669":"#9ca3af",fontSize:11,fontWeight:exitTab===key?700:500,cursor:"pointer",whiteSpace:"nowrap",minWidth:70}}>
+              {label}
+            </button>
+          ))}
+        </div>
+        <div style={{padding:"14px 16px"}}>
+          {activeExit?.note&&<div style={{fontSize:11,color:"#6b7280",background:"#f9fafb",padding:"8px 10px",borderRadius:8,marginBottom:10}}>{activeExit.note}</div>}
+          {[
+            ["Property Value",fmtD(activeExit?.value),"#374151"],
+            ["Equity at Exit",fmtD(activeExit?.equity),"#7c3aed"],
+            activeExit?.irr!=null?["IRR",`${((activeExit.irr||0)*100).toFixed(1)}%`,activeExit.irr>=0.15?"#059669":"#d97706"]:null,
+            activeExit?.multiple!=null?["Equity Multiple",`${(activeExit.multiple||0).toFixed(2)}x`,(activeExit.multiple||0)>=1.5?"#059669":"#d97706"]:null,
+            ["Cash Returned",fmtD(activeExit?.cashReturned),(activeExit?.cashReturned||0)>0?"#059669":"#dc2626"],
+            ["Remaining Loan",fmtD(activeExit?.loanBal),"#6b7280"],
+          ].filter(Boolean).map(([l,v,col])=>(
+            <div key={l} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",borderBottom:"1px solid #f9fafb",gap:8}}>
+              <span style={{fontSize:12,color:"#6b7280",flex:1}}>{l}</span>
+              <span style={{fontSize:14,fontWeight:700,fontFamily:"'DM Mono',monospace",color:col,flexShrink:0}}>{v}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Module C - Hold Projections Table */}
+      <div style={{background:"#f9fafb",borderRadius:12,overflow:"hidden",border:"1.5px solid #e5e7eb"}}>
+        <div style={{padding:"11px 16px",borderBottom:"1px solid #e5e7eb",background:"#f9fafb"}}>
+          <div style={{fontSize:10,fontWeight:700,color:"#9ca3af",textTransform:"uppercase",letterSpacing:"0.08em"}}>Module C — Hold Projections</div>
+        </div>
+        <div style={{overflowX:"auto"}}>
+          <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+            <thead><tr style={{background:"#f3f4f6"}}>{["Year","Value","Equity","Rent/mo","CF/mo"].map(h=><th key={h} style={{padding:"7px 10px",textAlign:"right",fontWeight:700,color:"#6b7280",fontSize:9,textTransform:"uppercase",whiteSpace:"nowrap"}}>{h}</th>)}</tr></thead>
+            <tbody>{proj.map((p,idx)=>(
+              <tr key={idx} style={{background:idx%2===0?"white":"#fafafa"}}>
+                <td style={{padding:"7px 10px",fontWeight:700,color:"#374151",textAlign:"right"}}>{p.yr}</td>
+                <td style={{padding:"7px 10px",textAlign:"right",fontFamily:"'DM Mono',monospace",color:"#059669",fontWeight:600}}>{fmtM(p.val)}</td>
+                <td style={{padding:"7px 10px",textAlign:"right",fontFamily:"'DM Mono',monospace",color:"#7c3aed",fontWeight:600}}>{fmtM(p.equity)}</td>
+                <td style={{padding:"7px 10px",textAlign:"right",fontFamily:"'DM Mono',monospace",color:"#374151"}}>{fmtD(p.rent)}</td>
+                <td style={{padding:"7px 10px",textAlign:"right",fontFamily:"'DM Mono',monospace",color:p.mcf>=0?"#059669":"#dc2626",fontWeight:700}}>{fmtD(p.mcf)}</td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+function RentalCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro,allDeals=[],currentDealId=null}) {
   const [addr,setAddr]=useState(saved?.address||"");
   const [advMode,setAdvMode]=useState(false);
   const [i,setI]=useState(saved||{
@@ -808,7 +1348,7 @@ function RentalCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro}) 
 
   const [calcTab,setCalcTab]=useState("calc");
   const isPro=isProProp||profile?.is_pro||false;
-  const dmMetrics={mcf:c.mcf,coc:c.coc,dscr:c.dscr,beo:c.beo,ltv:+i.pp>0?(+i.pp*(1-+i.down/100))/+i.pp:0,rent:+i.rent,expenses:totalExp,mortgage:mortgagePmt,pp:+i.pp};
+  const dmMetrics={mcf:c.mcf,coc:c.coc,dscr:c.dscr,beo:c.beo,ltv:+i.pp>0?(+i.pp*(1-+i.down/100))/+i.pp:0,rent:+i.rent,expenses:totalExp,mortgage:mortgagePmt,pp:+i.pp,rate:+i.rate,term:+i.term,down:+i.down,ti:c.ti,appreciation:+i.appreciation||3,rentGrowth:+i.rentGrowth||2,expenseGrowth:+i.expenseGrowth||2};
 
   return (<>
     <AddressBar value={addr} onChange={setAddr}/>
@@ -819,7 +1359,7 @@ function RentalCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro}) 
         </button>
       ))}
     </div>
-    {calcTab==="decision"&&<DecisionMode metrics={dmMetrics} strategy="rental" isPro={isPro}/>}
+    {calcTab==="decision"&&<DecisionMode metrics={dmMetrics} strategy="rental" isPro={isPro} onActivatePro={onActivatePro} allDeals={allDeals} currentDealId={currentDealId}/>}
     {calcTab==="calc"&&<>
     <div style={{display:"flex",gap:8,marginBottom:18}}>
       {[false,true].map(adv=>(
@@ -861,77 +1401,34 @@ function RentalCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro}) 
       </div>
 
       <div style={{display:"flex",flexDirection:"column",gap:12}}>
-        {/* Risk badge */}
-        <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",padding:"11px 14px",borderRadius:10,background:c.risk==="green"?"#f0fdf4":c.risk==="yellow"?"#fffbeb":"#fef2f2",border:`1.5px solid ${c.risk==="green"?"#bbf7d0":c.risk==="yellow"?"#fde68a":"#fecaca"}`}}>
-          <span style={{fontSize:18}}>{c.risk==="green"?"✅":c.risk==="yellow"?"⚠️":"🔴"}</span>
-          <div><div style={{fontSize:13,fontWeight:700,color:c.risk==="green"?"#059669":c.risk==="yellow"?"#d97706":"#dc2626"}}>{c.risk==="green"?"Strong Cash Flow":c.risk==="yellow"?"Marginal Deal":"Negative Cash Flow"}</div>
-          <div style={{fontSize:11,color:"#6b7280"}}>Monthly cash flow: {fmtD(c.mcf)}</div></div>
-        </div>
-
-        {/* Auto mortgage callout */}
-        <div style={{background:"#f0fdf4",borderRadius:10,padding:"11px 14px",border:"1.5px solid #bbf7d0",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-          <div><div style={{fontSize:10,fontWeight:700,color:"#6b7280",textTransform:"uppercase",marginBottom:2}}>Auto-Calculated Mortgage</div>
-          <div style={{fontSize:11,color:"#6b7280"}}>{fmtD(+i.pp*(1-+i.down/100))} loan · {i.rate}% · {i.term}yr</div></div>
-          <div style={{fontSize:20,fontWeight:800,fontFamily:"'DM Mono',monospace",color:"#059669"}}>{fmtD(c.mortgagePmt)}<span style={{fontSize:11,color:"#9ca3af",fontWeight:400}}>/mo</span></div>
-        </div>
-
-        <div className="results-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-          <BigResult label="Monthly Cash Flow" value={fmtD(c.mcf)} positive={c.mcf>=0} negative={c.mcf<0}/>
-          <BigResult label="Cash-on-Cash ROI" value={fmtP(c.coc)} positive={c.coc>=0.08} negative={c.coc<0}/>
-        </div>
-
-        <div style={{background:"#f9fafb",borderRadius:12,padding:"2px 14px",overflow:"hidden"}}>
-          <OutRow label="Total Expenses/mo" value={fmtD(totalExp)}/>
-          <OutRow label="Annual Cash Flow" value={fmtD(c.acf)} positive={c.acf>=0} negative={c.acf<0}/>
-          <OutRow label="CF after CapEx" value={fmtD(c.mcfAfterCapex)} positive={c.mcfAfterCapex>=0} negative={c.mcfAfterCapex<0}/>
-          <OutRow label="Cap Rate" value={fmtP(c.capRate)}/>
-          <OutRow label="NOI (annual)" value={fmtD(c.noi)}/>
-          <OutRow label="Total Investment" value={fmtD(c.ti)} highlight/>
-        </div>
-
-        {/* Debt metrics */}
-        <div style={{background:"#f9fafb",borderRadius:12,padding:"2px 16px"}}>
-          <div style={{padding:"8px 0",borderBottom:"1px solid #f3f4f6",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-            <span style={{fontSize:12,color:"#6b7280"}}>DSCR</span>
-            <span style={{fontSize:14,fontWeight:800,fontFamily:"'DM Mono',monospace",color:dscrColor}}>{c.dscr.toFixed(2)}x {c.dscr>=1.35?"✅":c.dscr>=1.2?"⚠️":"🔴"}</span>
+        {/* ── CALCULATOR MODE: Raw numbers only ── */}
+        {!advMode&&(<>
+          <div style={{background:"#f0fdf4",borderRadius:10,padding:"11px 14px",border:"1.5px solid #bbf7d0",display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}>
+            <div>
+              <div style={{fontSize:10,fontWeight:700,color:"#6b7280",textTransform:"uppercase",marginBottom:2}}>Auto Mortgage</div>
+              <div style={{fontSize:11,color:"#6b7280"}}>{fmtD(+i.pp*(1-+i.down/100))} · {i.rate}% · {i.term}yr</div>
+            </div>
+            <div style={{fontSize:20,fontWeight:800,fontFamily:"'DM Mono',monospace",color:"#059669"}}>{fmtD(c.mortgagePmt)}<span style={{fontSize:10,color:"#9ca3af",fontWeight:400}}>/mo</span></div>
           </div>
-          <OutRow label="Break-Even Occupancy" value={fmtP(c.beo)}/>
-          <OutRow label="Debt Coverage Buffer" value={fmtD(c.mcf)} positive={c.mcf>=0} negative={c.mcf<0}/>
-        </div>
-
-        {/* Sensitivity */}
-        <div style={{background:"#f9fafb",borderRadius:12,padding:"14px 16px"}}>
-          <div style={{fontSize:10,fontWeight:700,color:"#9ca3af",textTransform:"uppercase",marginBottom:10,letterSpacing:"0.06em"}}>Sensitivity / Risk View</div>
-          {c.sens.map((s,idx)=>(
-            <div key={idx} style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
-              <span style={{fontSize:12,color:s.label==="Base"?"#374151":"#6b7280",fontWeight:s.label==="Base"?600:400}}>{s.label}</span>
-              <span style={{fontSize:12,fontWeight:700,fontFamily:"'DM Mono',monospace",color:s.val>=0?"#059669":"#dc2626"}}>{fmtD(s.val)}/mo</span>
-            </div>
-          ))}
-        </div>
-
-        {/* Hold projections (advanced only) */}
-        {advMode&&(
-          <div style={{background:"#f9fafb",borderRadius:12,overflow:"hidden"}}>
-            <div style={{padding:"11px 16px",borderBottom:"1px solid #e5e7eb",background:"linear-gradient(135deg,#f0fdf4,#ecfdf5)"}}>
-              <span style={{fontSize:11,fontWeight:700,color:"#059669",textTransform:"uppercase",letterSpacing:"0.06em"}}>Hold Projections</span>
-            </div>
-            <div style={{overflowX:"auto"}}>
-              <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
-                <thead><tr style={{background:"#f3f4f6"}}>{["Year","Value","Equity","Rent","CF/mo"].map(h=><th key={h} style={{padding:"7px 10px",textAlign:"right",fontWeight:700,color:"#6b7280",fontSize:9,textTransform:"uppercase"}}>{h}</th>)}</tr></thead>
-                <tbody>{c.proj.map((p,idx)=>(
-                  <tr key={idx} style={{background:idx%2===0?"white":"#fafafa"}}>
-                    <td style={{padding:"7px 10px",fontWeight:700,color:"#374151",textAlign:"right"}}>{p.yr}</td>
-                    <td style={{padding:"7px 10px",textAlign:"right",fontFamily:"'DM Mono',monospace",color:"#059669",fontWeight:600}}>{fmtM(p.val)}</td>
-                    <td style={{padding:"7px 10px",textAlign:"right",fontFamily:"'DM Mono',monospace",color:"#7c3aed",fontWeight:600}}>{fmtM(p.equity)}</td>
-                    <td style={{padding:"7px 10px",textAlign:"right",fontFamily:"'DM Mono',monospace",color:"#374151"}}>{fmtD(p.rent)}</td>
-                    <td style={{padding:"7px 10px",textAlign:"right",fontFamily:"'DM Mono',monospace",color:p.mcf>=0?"#059669":"#dc2626",fontWeight:700}}>{fmtD(p.mcf)}</td>
-                  </tr>
-                ))}</tbody>
-              </table>
-            </div>
+          <div className="results-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+            <BigResult label="Monthly Cash Flow" value={fmtD(c.mcf)} positive={c.mcf>=0} negative={c.mcf<0}/>
+            <BigResult label="Cash-on-Cash ROI" value={fmtP(c.coc)} positive={c.coc>=0.08} negative={c.coc<0}/>
           </div>
-        )}
+          <div style={{background:"#f9fafb",borderRadius:12,padding:"2px 14px"}}>
+            <OutRow label="Monthly Cash Flow" value={fmtD(c.mcf)} positive={c.mcf>=0} negative={c.mcf<0}/>
+            <OutRow label="Cash-on-Cash ROI" value={fmtP(c.coc)} positive={c.coc>=0.08} negative={c.coc<0}/>
+            <OutRow label="DSCR" value={c.dscr.toFixed(2)+"x"}/>
+            <OutRow label="Cap Rate" value={fmtP(c.capRate)}/>
+            <OutRow label="Break-Even Occ." value={fmtP(c.beo)}/>
+            <OutRow label="NOI (annual)" value={fmtD(c.noi)}/>
+            <OutRow label="Total Expenses/mo" value={fmtD(totalExp)}/>
+            <OutRow label="Annual Cash Flow" value={fmtD(c.acf)} positive={c.acf>=0} negative={c.acf<0}/>
+            <OutRow label="Total Investment" value={fmtD(c.ti)} highlight/>
+          </div>
+        </>)}
+
+        {/* ── ADVANCED MODE: Projections + Exit Modeling ── */}
+        {advMode&&(<AdvancedRentalPanel i={i} s={s} c={c} mortgagePmt={c.mortgagePmt}/>)}
       </div>
     </div>
     </>}
@@ -978,7 +1475,7 @@ function WholesaleCalc({saved,onCalcChange,isPro:isProProp,onActivatePro}) {
         </button>
       ))}
     </div>
-    {calcTab==="decision"&&<DecisionMode metrics={dmMetrics} strategy="wholesale" isPro={isPro}/>}
+    {calcTab==="decision"&&<DecisionMode metrics={dmMetrics} strategy="wholesale" isPro={isPro} onActivatePro={onActivatePro}/>}
     {calcTab==="calc"&&<>
     {/* Mode toggle */}
     <div style={{display:"flex",gap:8,marginBottom:16}}>
@@ -1105,7 +1602,7 @@ function FlipCalc({saved,onCalcChange,isPro:isProProp,onActivatePro}) {
         </button>
       ))}
     </div>
-    {calcTab==="decision"&&<DecisionMode metrics={dmMetrics} strategy="flip" isPro={isPro}/>}
+    {calcTab==="decision"&&<DecisionMode metrics={dmMetrics} strategy="flip" isPro={isPro} onActivatePro={onActivatePro}/>}
     {calcTab==="calc"&&<>
     {/* Financing toggle */}
     <div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"}}>
@@ -1245,7 +1742,7 @@ function BRRRRCalc({saved,onCalcChange,isPro:isProProp,onActivatePro}) {
         </button>
       ))}
     </div>
-    {calcTab==="decision"&&<DecisionMode metrics={dmMetrics} strategy="brrrr" isPro={isPro}/>}
+    {calcTab==="decision"&&<DecisionMode metrics={dmMetrics} strategy="brrrr" isPro={isPro} onActivatePro={onActivatePro}/>}
     {calcTab==="calc"&&<>
     <div className="calc-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:24}}>
       <div style={{display:"flex",flexDirection:"column",gap:10}}>
@@ -1408,7 +1905,7 @@ function SubToCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro}) {
         </button>
       ))}
     </div>
-    {calcTab==="decision"&&<DecisionMode metrics={dmMetrics} strategy="subto" isPro={isPro}/>}
+    {calcTab==="decision"&&<DecisionMode metrics={dmMetrics} strategy="subto" isPro={isPro} onActivatePro={onActivatePro}/>}
     {calcTab==="calc"&&<>
     <div className="calc-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:24}}>
       <div style={{display:"flex",flexDirection:"column",gap:10}}>
@@ -1554,7 +2051,7 @@ function NovationCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro}
         </button>
       ))}
     </div>
-    {calcTab==="decision"&&<DecisionMode metrics={dmMetrics} strategy="novation" isPro={isPro}/>}
+    {calcTab==="decision"&&<DecisionMode metrics={dmMetrics} strategy="novation" isPro={isPro} onActivatePro={onActivatePro}/>}
     {calcTab==="calc"&&<>
     {/* Sale price sensitivity */}
     <div style={{background:"#fdf2f8",borderRadius:10,padding:"12px 16px",border:"1.5px solid #fbcfe8",marginBottom:18}}>
@@ -3807,7 +4304,7 @@ function AnalyzerApp({user,profile,onGoHome,onGoProfile,onSignOut}) {
               {loadedDealId&&<div style={{display:"flex",alignItems:"center",gap:7,background:"white",border:`1.5px solid ${activeMode.border}`,borderRadius:100,padding:"4px 12px"}}><span style={{fontSize:11}}>📂</span><span style={{fontSize:11,color:activeMode.color,fontWeight:600}}>Loaded from saved</span></div>}
             </div>
             <div className="calc-pad" style={{padding:"24px 18px",overflowX:"hidden"}}>
-              <CalcComponent key={`${mode}-${loadedDealId}`} saved={loadedDealId?deals.find(d=>d.id===loadedDealId)?.inputs:null} onCalcChange={handleCalcChange} profile={{...profile,is_pro:isPro}} isPro={isPro} onActivatePro={()=>setIsPro(true)}/>
+              <CalcComponent key={`${mode}-${loadedDealId}`} saved={loadedDealId?deals.find(d=>d.id===loadedDealId)?.inputs:null} onCalcChange={handleCalcChange} profile={{...profile,is_pro:isPro}} isPro={isPro} onActivatePro={()=>setIsPro(true)} allDeals={deals} currentDealId={loadedDealId}/>
             </div>
             <div style={{padding:"12px 16px",borderTop:"1px solid #f3f4f6",background:"#fafafa",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap"}}>
               <p style={{fontSize:12,color:"#9ca3af"}}>Updates as you type · Saved to your account</p>
