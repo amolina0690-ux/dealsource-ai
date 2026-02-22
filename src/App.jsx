@@ -758,34 +758,39 @@ function calcLiquidityRisk(metrics, strategy) {
 // ── MONTE CARLO ENGINE ──
 function runMonteCarlo(metrics, strategy, runs=1000) {
   if(strategy!=="rental"&&strategy!=="brrrr"&&strategy!=="subto") return null;
-  // expenses here = totalExp (includes vacancy reserve). Strip vacancy out for MC.
-  // MC applies vacancy independently as a % of gross rent.
   const {rent=0,expenses=0,mortgage=0,vacancy=0,capex=0,ti=0} = metrics;
-  const fixedExp = expenses - (vacancy||0); // strip vacancy reserve — applied stochastically below
+  const fixedExp = expenses - (vacancy||0);
+  const annualCapThreshold = Math.max(200, (ti||50000)*0.01);
 
   let negCF=0, dscrBelow1=0, capitalInfusion=0;
-  const annualCapitalThreshold = Math.max(200, (ti||50000)*0.01); // capital call = 1% of invested capital or $200
+  const cfSamples = [];
 
   for(let i=0;i<runs;i++) {
-    // Rent market variance ±15%
-    const rentVar = 1 + (Math.random()-0.5)*0.30;
-    // Vacancy: 0–20% of gross rent (independent of rent variance)
-    const vacRate = Math.random()*0.20;
-    // Fixed expense inflation ±20% (taxes, insurance, repairs, mgmt)
-    const expVar  = 1 + (Math.random()-0.5)*0.40;
-    const simGross = rent*rentVar;
-    const simEffRent = simGross*(1-vacRate);
-    const simExp   = (fixedExp-(capex||0))*expVar + (capex||0); // variable ops vary; capex stays fixed
-    const simMCF   = simEffRent - simExp - mortgage;
-    const simDSCR  = mortgage>0?(simEffRent-simExp)/mortgage:0;
+    const rentVar  = 1 + (Math.random()-0.5)*0.30;
+    const vacRate  = Math.random()*0.20;
+    const expVar   = 1 + (Math.random()-0.5)*0.40;
+    const simGross = rent * rentVar;
+    const simEff   = simGross * (1 - vacRate);
+    const simExp   = (fixedExp-(capex||0))*expVar + (capex||0);
+    const simMCF   = simEff - simExp - mortgage;
+    const simDSCR  = mortgage>0 ? (simEff-simExp)/mortgage : 0;
+    cfSamples.push(simMCF);
     if(simMCF<0) negCF++;
     if(simDSCR<1.0) dscrBelow1++;
-    if(simMCF < -annualCapitalThreshold/12) capitalInfusion++;
+    if(simMCF < -annualCapThreshold/12) capitalInfusion++;
   }
 
+  cfSamples.sort((a,b)=>a-b);
+  const median  = Math.round(cfSamples[Math.floor(runs*0.50)]);
+  const worst10 = Math.round(cfSamples[Math.floor(runs*0.10)]);
+
   return{
-    pNegCF:Math.round(negCF/runs*100),
-    pDSCR:Math.round(dscrBelow1/runs*100),
+    pNegCF:      Math.round(negCF/runs*100),
+    pDSCR:       Math.round(dscrBelow1/runs*100),
+    pCapInfusion:Math.round(capitalInfusion/runs*100),
+    median, worst10, runs,
+  };
+}
     pCapInfusion:Math.round(capitalInfusion/runs*100),
     runs,
   };
@@ -1174,204 +1179,198 @@ function DecisionMode({metrics, strategy, isPro, onActivatePro, allDeals=[], cur
 
 // ─── RENTAL CALC v6 — Decision Intelligence Engine ───────────────────────────
 
-// ══ SCORING ENGINE v3 — Normalized curves, hard-fail gates, risk tolerance ══
+// ══ SCORING ENGINE v5 — 3-Pillar Architecture ═══════════════════════════════
 
-// Hard-fail gate check
-function checkHardFails(metrics, riskTol="standard") {
-  const {mcf=0,dscr=0,beo=0,ti=0} = metrics;
-  const THRESHOLDS = {
-    conservative: {minDSCR:1.25, maxBEO:0.85, maxPayback:5,  minCF:-0},
-    standard:     {minDSCR:1.15, maxBEO:0.90, maxPayback:7,  minCF:-200},
-    aggressive:   {minDSCR:1.05, maxBEO:0.95, maxPayback:10, minCF:-500},
-  };
-  const T = THRESHOLDS[riskTol] || THRESHOLDS.standard;
-  const annualCF = mcf*12;
-  const payback = annualCF>0&&ti>0 ? ti/annualCF : Infinity;
+// ── Universal hard-fail gates ──
+function checkHardFails(metrics) {
+  const {mcf=0, dscr=0, beo=0} = metrics;
   const fails = [];
-  if(dscr<1.0)            fails.push({rule:"DSCR < 1.00", value:`${dscr.toFixed(2)}x`, consequence:"Debt service exceeds income — lender will not fund."});
-  if(beo>=0.95)           fails.push({rule:"Break-even ≥ 95%", value:`${(beo*100).toFixed(1)}%`, consequence:"Zero tolerance for vacancy. One turnover causes losses."});
-  if(mcf<=-200)           fails.push({rule:"Cash flow ≤ −$200/mo", value:fmtD(mcf)+"/mo", consequence:"Bleeding capital monthly with no recovery path."});
-  if(dscr<T.minDSCR&&dscr>=1.0) fails.push({rule:`DSCR below ${T.minDSCR}x (${riskTol})`, value:`${dscr.toFixed(2)}x`, consequence:"Below threshold for selected risk tolerance."});
-  if(beo>T.maxBEO&&beo<0.95)    fails.push({rule:`Break-even above ${(T.maxBEO*100).toFixed(0)}% (${riskTol})`, value:`${(beo*100).toFixed(1)}%`, consequence:"Insufficient vacancy buffer for selected risk tolerance."});
-  if(payback>T.maxPayback&&isFinite(payback)) fails.push({rule:`Payback > ${T.maxPayback} yrs (${riskTol})`, value:`${payback.toFixed(1)} yrs`, consequence:"Capital recovery exceeds acceptable hold period."});
-  return{fails, isFatalFail: fails.some(f=>["DSCR < 1.00","Break-even ≥ 95%","Cash flow ≤ −$200/mo"].includes(f.rule))};
+  if(dscr<1.00)  fails.push({rule:"DSCR < 1.00",       value:dscr.toFixed(2)+"x",       consequence:"Debt service exceeds income. No lender will fund this."});
+  if(beo>=0.95)  fails.push({rule:"Break-even ≥ 95%",   value:(beo*100).toFixed(1)+"%",  consequence:"Zero vacancy tolerance. One turnover creates losses."});
+  if(mcf<=-200)  fails.push({rule:"Cash flow ≤ −$200",  value:fmtD(mcf)+"/mo",           consequence:"Bleeding capital every month with no recovery path."});
+  return {fails, hasFatalFail: fails.length > 0};
 }
 
-// Stress test for Margin of Safety score
+// ── Stress test — rent −10%, vacancy +5%, expenses +10% ──
 function calcStressTest(metrics) {
-  const {rent=0,expenses=0,vacancy=0,mortgage=0,capex=0} = metrics;
+  const {rent=0, expenses=0, vacancy=0, mortgage=0, capex=0} = metrics;
   const fixedExp = expenses - (vacancy||0);
-  const stressRent = rent * 0.90;
-  const stressVac = stressRent * 0.05; // 5% additional vacancy
-  const stressExp = fixedExp * 1.10 + (capex||0);
-  const stressCF = stressRent - stressVac - stressExp - mortgage;
-  const stressDSCR = mortgage>0 ? (stressRent-stressVac-stressExp)/mortgage : 0;
-  return {stressCF: Math.round(stressCF), stressDSCR};
+  const sRent = rent * 0.90, sVac = sRent * 0.05;
+  const sExp  = fixedExp * 1.10 + (capex||0);
+  const sCF   = sRent - sVac - sExp - mortgage;
+  const sDSCR = mortgage>0 ? (sRent - sVac - sExp) / mortgage : 0;
+  return {stressCF: Math.round(sCF), stressDSCR: +sDSCR.toFixed(3)};
 }
 
-function calcRentalScore(metrics, riskTol="standard") {
-  const {mcf=0,coc=0,dscr=0,beo=0,ltv=0,rent=0,expenses=0,mortgage=0,pp=0,rate=7.5,ti=0,down=20,term=30,capex=0,cc=0,rehab=0,vacancy=0} = metrics;
+// ── PILLAR 1: SURVIVAL ──
+function calcSurvivalPillar(metrics, pNegCF=50) {
+  const {dscr=0, beo=0} = metrics;
+  const gates = checkHardFails(metrics);
+  if(gates.hasFatalFail) {
+    const isStructural = gates.fails.some(f=>f.rule.includes("Break-even"));
+    return {label:isStructural?"Structural Fail":"Fail", color:"#dc2626", bg:"#fef2f2", icon:"⛔", gates};
+  }
+  const vacTol = Math.max(0, 1 - beo);
+  let label, color, bg, icon;
+  if(dscr>=1.25 && vacTol>=0.10 && pNegCF<30)  {label="Strong";   color="#059669"; bg="#f0fdf4"; icon="✅";}
+  else if(dscr<1.05||vacTol<0.05||pNegCF>60)   {label="Critical"; color="#dc2626"; bg="#fef2f2"; icon="🔴";}
+  else if(dscr<1.25||vacTol<0.10||pNegCF>30)   {label="Fragile";  color="#d97706"; bg="#fffbeb"; icon="⚡";}
+  else                                           {label="Stable";   color="#2563eb"; bg="#eff6ff"; icon="🔷";}
+  return {label, color, bg, icon, gates, dscr, vacTol, pNegCF};
+}
 
-  // ── Hard-fail gate ──
-  const gateResult = checkHardFails(metrics, riskTol);
+// ── PILLAR 2: INCOME QUALITY ──
+function calcIncomePillar(metrics) {
+  const {mcf=0, coc=0} = metrics;
+  const cum5yrCF = mcf * 12 * 5;
+  let label, color, bg, icon;
+  if(mcf>=300 && coc>=0.08)    {label="Strong";   color="#059669"; bg="#f0fdf4"; icon="💪";}
+  else if(mcf<=0 || coc<0.04) {label="Weak";     color="#dc2626"; bg="#fef2f2"; icon="📉";}
+  else                         {label="Moderate"; color="#2563eb"; bg="#eff6ff"; icon="📊";}
+  return {label, color, bg, icon, mcf, coc, cum5yrCF};
+}
 
-  // ── Payback ──
+// ── PILLAR 3: CAPITAL EFFICIENCY ──
+function calcCapitalPillar(metrics) {
+  const {ti=0, pp=0, rate=7.5, term=30, down=20, mcf=0} = metrics;
+  const loan  = pp * (1 - down/100);
+  const bal5  = loanBalance(loan, rate, term, 5);
+  const pd5   = loan - bal5;
+  const cf5   = mcf * 12 * 5;
+  const ratio = ti>0 ? (pd5 + cf5) / ti : 0;
+  const recovery = mcf*12>0&&ti>0 ? Math.ceil(ti/(mcf*12)) : null;
+  let label, color, bg, icon;
+  if(ratio>0.30)       {label="Strong";   color="#059669"; bg="#f0fdf4"; icon="🏆";}
+  else if(ratio>=0.15) {label="Moderate"; color="#2563eb"; bg="#eff6ff"; icon="⚙️";}
+  else                 {label="Low";      color="#dc2626"; bg="#fef2f2"; icon="🔻";}
+  return {label, color, bg, icon, ratio, paydown5:Math.round(pd5), cf5:Math.round(cf5), recovery};
+}
+
+// ── DETERMINISTIC VERDICT ──
+function calcVerdict(survival, income, capital, riskTol="standard") {
+  if(survival.label==="Fail"||survival.label==="Structural Fail"||survival.label==="Critical")
+    return {label:"Avoid", color:"#dc2626", bg:"#fef2f2", icon:"🚫",
+            reason:"Survival failure — deal does not meet minimum safety criteria."};
+
+  if(survival.label==="Fragile") {
+    if(riskTol==="conservative")
+      return {label:"Avoid", color:"#dc2626", bg:"#fef2f2", icon:"🚫",
+              reason:"Fragile survival is unacceptable at conservative risk tolerance."};
+    if(riskTol==="standard" && income.label==="Weak")
+      return {label:"Avoid", color:"#dc2626", bg:"#fef2f2", icon:"🚫",
+              reason:"Fragile survival with weak income — too much risk at standard tolerance."};
+    if(riskTol==="aggressive" && income.label!=="Weak")
+      return {label:"Borderline", color:"#d97706", bg:"#fffbeb", icon:"⚠️",
+              reason:"Fragile survival accepted at aggressive tolerance."};
+    return {label:"Borderline", color:"#d97706", bg:"#fffbeb", icon:"⚠️",
+            reason:"Fragile survival — income partially compensates but risk is elevated."};
+  }
+
+  if(survival.label==="Strong" && income.label==="Strong" && capital.label==="Strong")
+    return {label:"Strong Buy", color:"#059669", bg:"#f0fdf4", icon:"🎯",
+            reason:"Durable cash flow, strong debt coverage, and efficient capital deployment."};
+
+  if(income.label==="Weak")
+    return {label:"Borderline", color:"#d97706", bg:"#fffbeb", icon:"⚠️",
+            reason:"Survival metrics acceptable but income quality is insufficient."};
+
+  if((survival.label==="Strong"||survival.label==="Stable") && income.label!=="Weak")
+    return {label:"Proceed", color:"#2563eb", bg:"#eff6ff", icon:"✅",
+            reason:"Solid fundamentals. Review flagged items before committing capital."};
+
+  return {label:"Borderline", color:"#d97706", bg:"#fffbeb", icon:"⚠️",
+          reason:"Mixed signals — stable structure but income or capital needs improvement."};
+}
+
+// ── RISK FLAGS ──
+function buildRiskFlags(metrics) {
+  const {mcf=0, coc=0, dscr=0, beo=0, ltv=0, rate=7.5} = metrics;
+  const {stressCF} = calcStressTest(metrics);
+  const flags = [];
+  if(dscr<1.0)       flags.push({severity:"Critical",  label:`DSCR ${dscr.toFixed(2)}x`,          cause:"Debt service exceeds net operating income.",            consequence:"Lender will not finance. Any vacancy triggers default.",          lever:"Price"});
+  else if(dscr<1.15) flags.push({severity:"High",      label:`DSCR ${dscr.toFixed(2)}x`,          cause:`Near minimum at ${rate}% rate.`,                        consequence:"One vacancy event breaches coverage. Refi risk is real.",        lever:"Rent or Price"});
+  if(mcf<0)          flags.push({severity:"High",      label:`Negative carry ${fmtD(mcf)}/mo`,    cause:"Total costs exceed rental income.",                      consequence:"You subsidize the property every month from your pocket.",        lever:"Rent or Expenses"});
+  else if(mcf<100)   flags.push({severity:"Moderate",  label:`Thin buffer ${fmtD(mcf)}/mo`,       cause:"Cash buffer insufficient for routine repairs.",           consequence:"One unexpected expense wipes 3–6 months of cash flow.",          lever:"Rent"});
+  if(beo>=0.95)      flags.push({severity:"Structural",label:`Break-even ${(beo*100).toFixed(1)}%`,cause:`Only ${((1-beo)*100).toFixed(1)}% vacancy tolerance.`,  consequence:"One month vacancy causes losses.",                               lever:"Price or Expenses"});
+  else if(beo>=0.88) flags.push({severity:"Moderate",  label:`Break-even ${(beo*100).toFixed(1)}%`,cause:"Limited vacancy buffer.",                               consequence:"Extended vacancy will produce losses.",                           lever:"Price"});
+  if(stressCF<0)     flags.push({severity:"High",      label:"Fails stress test",                  cause:"Rent −10%, vacancy +5%, expenses +10% → negative CF.", consequence:"Deal doesn't survive moderate market stress.",                   lever:"Price or Rent"});
+  if(coc<0.04)       flags.push({severity:"High",      label:`CoC ${(coc*100).toFixed(1)}%`,      cause:"Return below risk-free alternatives.",                   consequence:"Capital earns more in Treasury bonds without landlord risk.",    lever:"Price or Rent"});
+  else if(coc<0.08)  flags.push({severity:"Moderate",  label:`CoC ${(coc*100).toFixed(1)}%`,      cause:"Below 8% institutional benchmark.",                      consequence:"Marginal return for capital and effort deployed.",               lever:"Rent"});
+  if(ltv>=0.85)      flags.push({severity:"Moderate",  label:`LTV ${(ltv*100).toFixed(0)}%`,      cause:"High leverage amplifies losses.",                        consequence:"Limited equity cushion for market downturns.",                   lever:"Down Payment"});
+  return flags.slice(0,6);
+}
+
+// ── FIX-THE-DEAL TARGETS (with % delta, ranked by smallest change) ──
+function buildFixTargets(metrics) {
+  const {mcf=0,coc=0,dscr=0,rent=0,expenses=0,mortgage=0,pp=0,ti=0,
+         rate=7.5,term=30,down=20,cc=0,rehab=0,vacancy=0,capex=0} = metrics;
   const annualCF = mcf*12;
-  const payback = annualCF>0&&ti>0 ? ti/annualCF : Infinity;
+  const fixTargets = [];
+  const delta = (t,b) => { if(!b) return ""; const d=(t-b)/Math.abs(b)*100; return `${d>=0?"+":""}${d.toFixed(1)}%`; };
 
-  // ── Stress test ──
+  if(coc<0.08&&ti>0) {
+    const needACF=ti*0.08, tRent=rent+(needACF-annualCF)/12;
+    let lo=50000,hi=pp*1.5,tPP=pp;
+    for(let k=0;k<80;k++){const mid=(lo+hi)/2,L=mid*(1-down/100),rr=rate/100/12,nn=term*12,m=L*(rr*Math.pow(1+rr,nn))/(Math.pow(1+rr,nn)-1),nTI=mid*down/100+cc+rehab;((rent-expenses-m)*12/Math.max(nTI,1))>0.08?hi=mid:lo=mid;tPP=mid;}
+    if(tPP<50000)tPP=pp*0.75;
+    let lo2=down,hi2=50,tDown=down;
+    for(let k=0;k<60;k++){const mid=(lo2+hi2)/2,L=pp*(1-mid/100),rr=rate/100/12,nn=term*12,m=L*(rr*Math.pow(1+rr,nn))/(Math.pow(1+rr,nn)-1),nTI=pp*mid/100+cc+rehab;((rent-expenses-m)*12/Math.max(nTI,1))>0.08?hi2=mid:lo2=mid;tDown=mid;}
+    const tPP_r=Math.round(tPP/5000)*5000, tRent_r=Math.round(tRent/50)*50, tDown_r=Math.round(tDown);
+    const opts=[
+      {icon:"🏷️",label:"Purchase price",value:fmtD(tPP_r),            delta:delta(tPP_r,pp),                    feasible:tPP_r>=pp*0.70},
+      {icon:"💰",label:"Monthly rent",  value:fmtD(tRent_r)+"/mo",    delta:delta(tRent_r,rent),                 feasible:(tRent_r-rent)/Math.max(rent,1)<=0.15},
+      {icon:"📥",label:"Down payment",  value:tDown_r+"%",             delta:`+${(tDown_r-down).toFixed(0)}pp`, feasible:tDown_r<=40},
+    ];
+    fixTargets.push({goal:"8% CoC",options:opts.sort((a,b)=>Math.abs(parseFloat(a.delta||"99"))-Math.abs(parseFloat(b.delta||"99")))});
+  }
+
+  if(dscr<1.25&&mortgage>0) {
+    const fxNoVac=expenses-(vacancy||0),tRent=mortgage*1.25+fxNoVac+(vacancy||0)+capex;
+    const maxL=(rent-expenses)/1.25/(rate/100/12)*(1-1/Math.pow(1+rate/100/12,term*12));
+    const tRent_r=Math.round(tRent/50)*50, tL_r=Math.round(Math.max(0,maxL)/5000)*5000;
+    const opts=[
+      {icon:"💰",label:"Monthly rent",value:fmtD(tRent_r)+"/mo",delta:delta(tRent_r,rent),          feasible:(tRent_r-rent)/Math.max(rent,1)<=0.12},
+      {icon:"🏦",label:"Max loan",    value:fmtD(tL_r),          delta:delta(tL_r,pp*(1-down/100)), feasible:tL_r>=pp*0.50},
+    ];
+    fixTargets.push({goal:"DSCR 1.25",options:opts.sort((a,b)=>Math.abs(parseFloat(a.delta||"99"))-Math.abs(parseFloat(b.delta||"99")))});
+  }
+
+  if(mcf<300) {
+    const def=300-mcf, tRent=rent+def;
+    let lo3=50000,hi3=pp*1.2,tPP=pp;
+    for(let k=0;k<60;k++){const mid=(lo3+hi3)/2,L=mid*(1-down/100),rr=rate/100/12,nn=term*12,m=L*(rr*Math.pow(1+rr,nn))/(Math.pow(1+rr,nn)-1);(rent-expenses-m>=300)?hi3=mid:lo3=mid;tPP=mid;}
+    const tRent_r=Math.round(tRent/50)*50, tPP_r=Math.round(Math.max(0,tPP)/5000)*5000;
+    const opts=[
+      {icon:"💰",label:"Monthly rent",  value:fmtD(tRent_r)+"/mo",delta:delta(tRent_r,rent), feasible:def/Math.max(rent,1)<=0.15},
+      {icon:"🏷️",label:"Purchase price",value:fmtD(tPP_r),        delta:delta(tPP_r,pp),     feasible:tPP_r>=pp*0.70},
+    ];
+    fixTargets.push({goal:"$300/mo CF",options:opts.sort((a,b)=>Math.abs(parseFloat(a.delta||"99"))-Math.abs(parseFloat(b.delta||"99")))});
+  }
+
+  const {stressCF} = calcStressTest(metrics);
+  if(stressCF<0) {
+    const def=Math.abs(stressCF), tRent=Math.round((rent+def/0.85)/50)*50;
+    fixTargets.push({goal:"Survive stress",options:[
+      {icon:"💰",label:"Monthly rent",     value:fmtD(tRent)+"/mo",               delta:delta(tRent,rent),                       feasible:def<rent*0.20},
+      {icon:"✂️", label:"Expense reduction",value:"≥ "+fmtD(Math.round(def/10)*10)+"/mo", delta:"-"+(def/Math.max(expenses,1)*100).toFixed(1)+"%", feasible:true},
+    ]});
+  }
+
+  return fixTargets;
+}
+
+// ── MASTER SCORER ──
+function calcRentalScore(metrics, riskTol="standard", monteResult=null) {
+  const pNegCF    = monteResult?.pNegCF ?? 50;
+  const survival  = calcSurvivalPillar(metrics, pNegCF);
+  const income    = calcIncomePillar(metrics);
+  const capital   = calcCapitalPillar(metrics);
+  const verdict   = calcVerdict(survival, income, capital, riskTol);
+  const flags     = buildRiskFlags(metrics);
+  const fixTargets = buildFixTargets(metrics);
   const {stressCF, stressDSCR} = calcStressTest(metrics);
-
-  // ── 6 normalized component scores (0–100) ──
-
-  // 1. Cash Flow Strength — 25%  (normalized to price, diminishing returns)
-  const cfRatio = pp>0 ? mcf/pp : 0;
-  const K_cf = 150;
-  const cfScore = Math.round(100*(1-Math.exp(-Math.max(0,cfRatio)*K_cf)));
-
-  // 2. DSCR Strength — 25%  (sigmoid centered at 1.25)
-  const k_dscr = 3;
-  const dscrScore = Math.round(100/(1+Math.exp(-k_dscr*(dscr-1.25))));
-
-  // 3. CoC Return — 15%  (exponential, 10% benchmark)
-  const cocScore = Math.round(100*(1-Math.exp(-Math.max(0,coc)/0.10)));
-
-  // 4. Liquidity / Payback — 15%  (exponential decay)
-  const liqScore = annualCF<=0||!isFinite(payback) ? 0 : Math.round(100*Math.exp(-payback/5));
-
-  // 5. Break-even Occupancy — 10%  (linear 0–1)
-  const beoScore = Math.round(100*Math.max(0,1-beo));
-
-  // 6. Margin of Safety — 10%  (stress test survival)
-  let mosScore;
-  if(stressCF<0) mosScore=0;
-  else if(stressDSCR<1.10) mosScore=30;
-  else if(stressDSCR<1.25) mosScore=70;
-  else mosScore=100;
-
-  // ── Weighted composite ──
-  const W={cf:0.25,dscr:0.25,coc:0.15,liq:0.15,beo:0.10,mos:0.10};
-  let raw = cfScore*W.cf + dscrScore*W.dscr + cocScore*W.coc + liqScore*W.liq + beoScore*W.beo + mosScore*W.mos;
-
-  // Hard-fail override: fatal fails cap score at 30
-  if(gateResult.isFatalFail) raw = Math.min(raw, 30);
-
-  const score = Math.min(100, Math.max(0, Math.round(raw)));
-
-  // ── Grade bands ──
-  let grade,gradeColor,verdictBg,verdictColor,riskLevel,riskColor;
-  if(score>=90)     {grade="A";gradeColor="#059669";verdictBg="#f0fdf4";verdictColor="#059669";riskLevel="Low";riskColor="#059669";}
-  else if(score>=80){grade="B";gradeColor="#2563eb";verdictBg="#eff6ff";verdictColor="#2563eb";riskLevel="Low-Mod";riskColor="#2563eb";}
-  else if(score>=70){grade="C";gradeColor="#d97706";verdictBg="#fffbeb";verdictColor="#d97706";riskLevel="Moderate";riskColor="#d97706";}
-  else if(score>=60){grade="D";gradeColor="#ea580c";verdictBg="#fff7ed";verdictColor="#ea580c";riskLevel="High";riskColor="#ea580c";}
-  else              {grade="F";gradeColor="#dc2626";verdictBg="#fef2f2";verdictColor="#dc2626";riskLevel="Critical";riskColor="#dc2626";}
-
-  // ── Risk flags (narrative, 3–6 max) ──
-  const flags=[];
-  const strengths=[];
-
-  if(dscr<1.0) flags.push({severity:"Critical",label:`DSCR ${dscr.toFixed(2)}x`,metric:`${dscr.toFixed(2)}x`,cause:"Debt service exceeds net operating income.",consequence:"Lender will not finance. Any vacancy triggers default.",lever:"Price"});
-  else if(dscr<1.15) flags.push({severity:"High",label:`DSCR ${dscr.toFixed(2)}x`,metric:`${dscr.toFixed(2)}x`,cause:`Near minimum at ${rate}% rate.`,consequence:"One vacancy event breaches coverage. Refi risk is real.",lever:"Rent or Price"});
-  else if(dscr>=1.4) strengths.push("Strong debt coverage");
-
-  if(mcf<0) flags.push({severity:"High",label:`Negative carry ${fmtD(mcf)}/mo`,metric:`${fmtD(mcf)}/mo`,cause:"Total costs exceed rental income.",consequence:"You subsidize the property every month from your own pocket.",lever:"Rent or Expenses"});
-  else if(mcf<100) flags.push({severity:"Moderate",label:`Thin buffer ${fmtD(mcf)}/mo`,metric:`${fmtD(mcf)}/mo`,cause:"Cash buffer insufficient for routine repairs.",consequence:"One unexpected expense eliminates 3–6 months of cash flow.",lever:"Rent"});
-  else if(mcf>=400) strengths.push("Healthy monthly buffer");
-
-  if(beo>=0.95) flags.push({severity:"Structural",label:`Break-even ${(beo*100).toFixed(1)}%`,metric:`${(beo*100).toFixed(1)}%`,cause:`Only ${((1-beo)*100).toFixed(1)}% vacancy tolerance.`,consequence:"One month vacancy causes losses. No room for market softness.",lever:"Price or Expenses"});
-  else if(beo>=0.88) flags.push({severity:"Moderate",label:`Break-even ${(beo*100).toFixed(1)}%`,metric:`${(beo*100).toFixed(1)}%`,cause:"Limited vacancy buffer.",consequence:"Extended vacancy or market softness will cause losses.",lever:"Price"});
-  else if(beo<=0.80) strengths.push("Strong vacancy cushion");
-
-  if(stressCF<0) flags.push({severity:"High",label:"Fails stress test",metric:`${fmtD(stressCF)}/mo stressed`,cause:"Rent −10%, vacancy +5%, expenses +10% produces negative cash flow.",consequence:"Deal doesn't survive moderate market stress.",lever:"Price or Rent"});
-
-  if(payback>7&&isFinite(payback)) flags.push({severity:"Moderate",label:`Payback ${payback.toFixed(1)} yrs`,metric:`${payback.toFixed(1)} yrs`,cause:"Capital recovery via cash flow is slow.",consequence:"Appreciation-dependent returns. Illiquid position for 7+ years.",lever:"Down Payment"});
-
-  if(coc<0.04) flags.push({severity:"High",label:`CoC ${(coc*100).toFixed(1)}%`,metric:`${(coc*100).toFixed(1)}%`,cause:"Return below risk-free alternatives.",consequence:"Capital earns more in Treasury bonds without landlord risk.",lever:"Price or Rent"});
-  else if(coc<0.08) flags.push({severity:"Moderate",label:`CoC ${(coc*100).toFixed(1)}%`,metric:`${(coc*100).toFixed(1)}%`,cause:"Below 8% institutional benchmark.",consequence:"Marginal return for capital and effort deployed.",lever:"Rent"});
-  else if(coc>=0.12) strengths.push("Strong cash-on-cash return");
-
-  // Cap at 6 flags
-  const topFlags = flags.slice(0,6);
-
-  // ── Component breakdown ──
-  const components=[
-    {label:"Cash Flow Strength",score:cfScore,weight:"25%",color:cfScore>=70?"#059669":cfScore>=40?"#d97706":"#dc2626"},
-    {label:"DSCR Strength",     score:dscrScore,weight:"25%",color:dscrScore>=70?"#059669":dscrScore>=40?"#d97706":"#dc2626"},
-    {label:"CoC Return",        score:cocScore, weight:"15%",color:cocScore>=70?"#059669":cocScore>=40?"#d97706":"#dc2626"},
-    {label:"Liquidity/Payback", score:liqScore, weight:"15%",color:liqScore>=70?"#059669":liqScore>=40?"#d97706":"#dc2626"},
-    {label:"Break-even Occ.",   score:beoScore, weight:"10%",color:beoScore>=70?"#059669":beoScore>=40?"#d97706":"#dc2626"},
-    {label:"Stress Test",       score:mosScore, weight:"10%",color:mosScore>=70?"#059669":mosScore>=40?"#d97706":"#dc2626"},
-  ];
-
-  // ── Fix-the-deal targets (reverse-engineered levers) ──
-  const fixTargets=[];
-
-  if(coc<0.08&&ti>0){
-    const needACF=ti*0.08;
-    const targetRent_coc=rent+(needACF-annualCF)/12;
-    // Solve PP numerically
-    let lo_=50000,hi_=pp*1.5,targetPP=pp;
-    for(let k=0;k<80;k++){
-      const mid=(lo_+hi_)/2;
-      const L=mid*(1-down/100),rr=rate/100/12,nn=term*12;
-      const m=L*(rr*Math.pow(1+rr,nn))/(Math.pow(1+rr,nn)-1);
-      const newTI=mid*down/100+cc+rehab;
-      const newCoC=(rent-expenses-m)*12/Math.max(newTI,1);
-      if(newCoC>0.08) hi_=mid; else lo_=mid; targetPP=mid;
-    }
-    if(targetPP<50000) targetPP=pp*0.75;
-    // Solve down payment
-    let lo2=down,hi2=50,targetDown=down;
-    for(let k=0;k<60;k++){
-      const mid2=(lo2+hi2)/2;
-      const L=pp*(1-mid2/100),rr=rate/100/12,nn=term*12;
-      const m=L*(rr*Math.pow(1+rr,nn))/(Math.pow(1+rr,nn)-1);
-      const newTI=pp*mid2/100+cc+rehab;
-      const newCoC=(rent-expenses-m)*12/Math.max(newTI,1);
-      if(newCoC>0.08) hi2=mid2; else lo2=mid2; targetDown=mid2;
-    }
-    fixTargets.push({goal:"8% CoC",target:"8% CoC",options:[
-      {icon:"🏷️",label:"Reduce purchase price to",value:`≤ ${fmtD(Math.round(targetPP/5000)*5000)}`,feasible:targetPP>=pp*0.70},
-      {icon:"💰",label:"Increase rent to",value:`≥ ${fmtD(Math.round(targetRent_coc/50)*50)}/mo`,feasible:(targetRent_coc-rent)/Math.max(rent,1)<=0.15},
-      {icon:"📥",label:"Increase down payment to",value:`≥ ${Math.round(targetDown)}%`,feasible:targetDown<=40},
-    ]});
-  }
-
-  if(dscr<1.25&&mortgage>0){
-    const fixedExpNoVac=expenses-(vacancy||0);
-    const targetRent_dscr=mortgage*1.25+fixedExpNoVac+(vacancy||0)+capex;
-    const maxLoan=(rent-expenses)/1.25/(rate/100/12)*(1-1/Math.pow(1+rate/100/12,term*12));
-    fixTargets.push({goal:"DSCR 1.25",target:"DSCR 1.25x",options:[
-      {icon:"💰",label:"Increase rent to",value:`≥ ${fmtD(Math.round(targetRent_dscr/50)*50)}/mo`,feasible:(targetRent_dscr-rent)/Math.max(rent,1)<=0.12},
-      {icon:"🏦",label:"Max loan amount",value:`≤ ${fmtD(Math.round(Math.max(0,maxLoan)/5000)*5000)}`,feasible:maxLoan>=pp*0.50},
-    ]});
-  }
-
-  if(mcf<300){
-    const deficit=300-mcf;
-    const targetRent_cf=rent+deficit;
-    let lo3=50000,hi3=pp*1.2,targetPP_cf=pp;
-    for(let k=0;k<60;k++){
-      const mid=(lo3+hi3)/2;
-      const L=mid*(1-down/100),rr=rate/100/12,nn=term*12;
-      const m=L*(rr*Math.pow(1+rr,nn))/(Math.pow(1+rr,nn)-1);
-      if(rent-expenses-m>=300) hi3=mid; else lo3=mid; targetPP_cf=mid;
-    }
-    fixTargets.push({goal:"$300/mo CF",target:"$300/mo cash flow",options:[
-      {icon:"💰",label:"Increase rent to",value:`≥ ${fmtD(Math.round(targetRent_cf/50)*50)}/mo`,feasible:(deficit/Math.max(rent,1))<=0.15},
-      {icon:"🏷️",label:"Reduce purchase price to",value:`≤ ${fmtD(Math.round(Math.max(0,targetPP_cf)/5000)*5000)}`,feasible:targetPP_cf>=pp*0.70},
-    ]});
-  }
-
-  if(stressCF<0){
-    const stressDeficit=Math.abs(stressCF);
-    fixTargets.push({goal:"Survive stress",target:"Pass stress test",options:[
-      {icon:"💰",label:"Increase rent to",value:`≥ ${fmtD(Math.round((rent+stressDeficit/0.85)/50)*50)}/mo`,feasible:stressDeficit<rent*0.20},
-      {icon:"🏷️",label:"Reduce purchase price",value:`cut by ≥ ${fmtD(Math.round(stressDeficit*12/1000)*1000)}/yr equiv`,feasible:true},
-    ]});
-  }
-
-  return{score,grade,gradeColor,verdictBg,verdictColor,riskLevel,riskColor,flags:topFlags,strengths,components,fixTargets,gateResult,payback,stressCF,stressDSCR,annualCF};
+  const gates     = checkHardFails(metrics);
+  return {survival, income, capital, verdict, flags, fixTargets, stressCF, stressDSCR, gates};
 }
 
 // ══ CHART COMPONENTS (unchanged) ══
@@ -1577,58 +1576,60 @@ function RentalCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro,al
     vacancy:+i.vacancy,capex:+i.capex,cc:+i.cc,rehab:+i.rehab,
   }),[c,totalExp,mort,i]);
 
-  const riskData=useMemo(()=>calcRentalScore(metrics,riskTol),[metrics,riskTol]);
-  const monte=useMemo(()=>runMonteCarlo(metrics,"rental"),[metrics]);
-  const liq=useMemo(()=>calcLiquidityRisk(metrics,"rental"),[metrics]);
-  const exits=useMemo(()=>calcExitScenarios(metrics,"rental"),[metrics]);
+  const riskData=useMemo(()=>calcRentalScore(metrics,riskTol,monte),[metrics,riskTol,monte]);
 
   useEffect(()=>{setOptPP(null);setOptRent(null);setOptDown(null);},[i.pp,i.rent,i.down]);
   useEffect(()=>onCalcChange({...i,address:addr},{primary:fmtD(c.mcf),secondary:fmtP(c.coc),label:"Mo. Cash Flow",label2:"CoC ROI"}),[i,c,addr]);
 
-  const gc=riskData.gradeColor;
   const pp=+(optPP??i.pp), optRentVal=+(optRent??i.rent), down=+(optDown??i.down);
 
-  // Snapshot pass/fail gates
   const annualCF=c.mcf*12;
   const payback=annualCF>0&&c.ti>0?c.ti/annualCF:Infinity;
   const snapFlags=[
-    {label:"DSCR ≥ 1.15",pass:c.dscr>=1.15,value:`${c.dscr.toFixed(2)}x`},
-    {label:"Cash Flow ≥ $0",pass:c.mcf>=0,value:`${fmtD(c.mcf)}/mo`},
-    {label:"Break-even ≤ 90%",pass:c.beo<=0.90,value:`${(c.beo*100).toFixed(1)}%`},
-    {label:"Payback ≤ 7 yrs",pass:isFinite(payback)&&payback<=7,value:isFinite(payback)?`${payback.toFixed(1)} yrs`:"Never"},
+    {label:"DSCR ≥ 1.15",     pass:c.dscr>=1.15,         value:c.dscr.toFixed(2)+"x"},
+    {label:"Cash Flow ≥ $0",   pass:c.mcf>=0,             value:fmtD(c.mcf)+"/mo"},
+    {label:"Break-even ≤ 90%", pass:c.beo<=0.90,           value:(c.beo*100).toFixed(1)+"%"},
+    {label:"Payback ≤ 7 yrs",  pass:isFinite(payback)&&payback<=7, value:isFinite(payback)?payback.toFixed(1)+" yrs":"Never"},
   ];
   const passCount=snapFlags.filter(f=>f.pass).length;
   const snapResult=passCount===4?"Pass":passCount>=2?"Borderline":"Fail";
   const snapColor=snapResult==="Pass"?"#059669":snapResult==="Borderline"?"#d97706":"#dc2626";
   const snapBg=snapResult==="Pass"?"#f0fdf4":snapResult==="Borderline"?"#fffbeb":"#fef2f2";
 
-  // Chart data
   let cumCF=0;
   const cfChartData=c.proj.map(p=>{cumCF+=p.mcf*12; return{y:Math.round(cumCF),label:`Y${p.yr}`};});
   const exitScenarios=exits||[];
+
+  const {verdict,survival,income,capital} = riskData;
+  const vColor=verdict.color, vBg=verdict.bg;
 
   return(
     <div style={{display:"flex",flexDirection:"column",gap:0}}>
       <AddressBar value={addr} onChange={setAddr}/>
 
-      {/* ══ HEADER STRIP — always visible ══ */}
+      {/* ══ HEADER STRIP ══ */}
       <div style={{background:"linear-gradient(135deg,#0f172a 0%,#1a2744 100%)",borderRadius:16,padding:"18px 20px",marginBottom:18,boxShadow:"0 6px 28px rgba(0,0,0,0.22)"}}>
-        {/* Row 1: Grade + KPIs */}
-        <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:14,flexWrap:"wrap"}}>
-          <div style={{width:52,height:52,borderRadius:"50%",background:gc,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,boxShadow:`0 0 0 4px ${gc}30`}}>
-            <span style={{fontSize:24,fontWeight:900,color:"white",fontFamily:"'Fraunces',serif"}}>{riskData.grade}</span>
+
+        {/* Row 1: Verdict + Pillars + Snapshot */}
+        <div style={{display:"flex",alignItems:"flex-start",gap:10,marginBottom:14,flexWrap:"wrap"}}>
+          {/* Verdict card */}
+          <div style={{background:vBg,borderRadius:10,padding:"10px 14px",flexShrink:0,minWidth:120}}>
+            <div style={{fontSize:9,color:"#6b7280",textTransform:"uppercase",fontWeight:700,letterSpacing:"0.07em",marginBottom:3}}>Decision</div>
+            <div style={{fontSize:17,fontWeight:900,color:vColor,lineHeight:1,marginBottom:4}}>{verdict.icon} {verdict.label}</div>
+            <div style={{fontSize:9,color:vColor,opacity:0.85,lineHeight:1.3,maxWidth:145}}>{verdict.reason}</div>
           </div>
-          <div style={{flex:1,minWidth:0}}>
-            <div style={{display:"flex",alignItems:"baseline",gap:6,marginBottom:3}}>
-              <span style={{fontSize:30,fontWeight:900,fontFamily:"'DM Mono',monospace",color:gc,lineHeight:1}}>{riskData.score}</span>
-              <span style={{fontSize:11,color:"rgba(255,255,255,0.3)"}}>/100</span>
-              <span style={{fontSize:10,fontWeight:700,color:riskData.riskColor,background:`${riskData.riskColor}25`,padding:"2px 8px",borderRadius:100,marginLeft:4}}>{riskData.riskLevel} Risk</span>
-            </div>
-            <div style={{height:4,background:"rgba(255,255,255,0.1)",borderRadius:2,overflow:"hidden"}}>
-              <div style={{height:"100%",width:`${riskData.score}%`,background:gc,borderRadius:2,transition:"width 0.6s ease"}}/>
-            </div>
+
+          {/* Three pillars */}
+          <div style={{display:"flex",gap:5,flex:1,minWidth:0}}>
+            {[{name:"Survival",d:survival},{name:"Income",d:income},{name:"Capital",d:capital}].map(({name,d})=>(
+              <div key={name} style={{flex:1,background:d.bg,borderRadius:8,padding:"8px 10px",border:`1.5px solid ${d.color}25`,minWidth:0}}>
+                <div style={{fontSize:8,color:"#9ca3af",textTransform:"uppercase",fontWeight:700,letterSpacing:"0.06em",marginBottom:3,whiteSpace:"nowrap"}}>{name}</div>
+                <div style={{fontSize:12,fontWeight:900,color:d.color,whiteSpace:"nowrap"}}>{d.icon} {d.label}</div>
+              </div>
+            ))}
           </div>
-          {/* Snapshot result pill */}
+
+          {/* Snapshot pill */}
           <div style={{background:snapBg,borderRadius:10,padding:"8px 14px",flexShrink:0,textAlign:"center"}}>
             <div style={{fontSize:8,color:"#9ca3af",textTransform:"uppercase",fontWeight:700,marginBottom:1}}>Snapshot</div>
             <div style={{fontSize:15,fontWeight:900,color:snapColor}}>{snapResult}</div>
@@ -1666,13 +1667,12 @@ function RentalCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro,al
           ))}
         </div>
       </div>
-
       {/* ══ MAIN GRID ══ */}
       <div className="calc-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:18,alignItems:"start"}}>
 
         {/* ── LEFT: INPUTS ── */}
         <div style={{display:"flex",flexDirection:"column",gap:10}}>
-          <InputSection title="Acquisition" accent="#10b981">
+          <InputSection title="Acquisition" accent="#10b981" key={`acq-${viewMode}`} defaultOpen={viewMode!=="decision"} badge={viewMode==="decision"?`${fmtD(c.effPP)} · ${fmtD(mort)}/mo`:undefined}>
             <div style={{display:"flex",flexDirection:"column",gap:10}}>
               <NF label="Purchase Price" value={i.pp} onChange={sv("pp")} prefix="$" step={5000}/>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
@@ -1689,7 +1689,7 @@ function RentalCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro,al
             </div>
           </InputSection>
 
-          <InputSection title="Income" accent="#10b981">
+          <InputSection title="Income" accent="#10b981" key={`inc-${viewMode}`} defaultOpen={viewMode!=="decision"} badge={viewMode==="decision"?`${fmtD(c.effRent)}/mo`:undefined}>
             <div style={{display:"flex",flexDirection:"column",gap:8}}>
               <NF label="Monthly Rent" value={i.rent} onChange={sv("rent")} prefix="$" step={50}/>
               <NF label="Other Income" value={i.otherIncome||0} onChange={sv("otherIncome")} prefix="$" step={25}/>
@@ -1888,66 +1888,176 @@ function RentalCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro,al
           {viewMode==="decision"&&(
             <ProGate isPro={isPro} trigger="unlock" onActivatePro={onActivatePro}>
               <>
-                {/* A: Risk Tolerance + Verdict Engine */}
-                <div style={{background:"white",borderRadius:12,border:"1.5px solid #e5e7eb",overflow:"hidden",boxShadow:"0 1px 4px rgba(0,0,0,0.05)"}}>
-                  <div style={{padding:"12px 16px",borderBottom:"1px solid #f3f4f6",background:"linear-gradient(135deg,#f8fafc,#f1f5f9)"}}>
-                    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
-                      <div style={{fontSize:11,fontWeight:700,color:"#374151",textTransform:"uppercase",letterSpacing:"0.06em"}}>Risk Tolerance</div>
+                {/* A: VERDICT HEADER */}
+                <div style={{background:vBg,borderRadius:12,border:`2px solid ${vColor}30`,padding:"16px 18px",boxShadow:"0 1px 6px rgba(0,0,0,0.06)"}}>
+                  <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>
+                    <div style={{flex:1,minWidth:200}}>
+                      <div style={{fontSize:9,fontWeight:700,color:vColor,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:6}}>Decision Engine</div>
+                      <div style={{fontSize:24,fontWeight:900,color:vColor,lineHeight:1,marginBottom:6}}>{verdict.icon} {verdict.label}</div>
+                      <div style={{fontSize:12,color:"#374151",lineHeight:1.5}}>{verdict.reason}</div>
                     </div>
-                    <div style={{display:"flex",gap:6}}>
-                      {[["conservative","🛡️","Conservative","DSCR ≥1.25, payback ≤5yr"],["standard","⚖️","Standard","DSCR ≥1.15, payback ≤7yr"],["aggressive","🚀","Aggressive","DSCR ≥1.05, payback ≤10yr"]].map(([key,icon,label,sub])=>(
-                        <button key={key} onClick={()=>setRiskTol(key)}
-                          style={{flex:1,padding:"8px 6px",borderRadius:8,border:`1.5px solid ${riskTol===key?"#059669":"#e5e7eb"}`,background:riskTol===key?"#f0fdf4":"white",cursor:"pointer",textAlign:"left",transition:"all 0.15s"}}>
-                          <div style={{fontSize:12}}>{icon} <span style={{fontSize:11,fontWeight:700,color:riskTol===key?"#059669":"#374151"}}>{label}</span></div>
-                          <div style={{fontSize:9,color:"#9ca3af",marginTop:2}}>{sub}</div>
-                        </button>
-                      ))}
+                    {/* Risk tolerance — interpretation layer only */}
+                    <div style={{flexShrink:0}}>
+                      <div style={{fontSize:9,color:"#9ca3af",textTransform:"uppercase",fontWeight:700,marginBottom:6,textAlign:"right"}}>Risk Tolerance</div>
+                      <div style={{display:"flex",gap:4}}>
+                        {[["conservative","🛡️"],["standard","⚖️"],["aggressive","🚀"]].map(([key,icon])=>(
+                          <button key={key} onClick={()=>setRiskTol(key)}
+                            style={{padding:"5px 8px",borderRadius:7,border:`1.5px solid ${riskTol===key?vColor:"#e5e7eb"}`,background:riskTol===key?vBg:"white",color:riskTol===key?vColor:"#6b7280",fontSize:10,fontWeight:700,cursor:"pointer",transition:"all 0.12s",textTransform:"capitalize"}}>
+                            {icon} {key.slice(0,4)}.
+                          </button>
+                        ))}
+                      </div>
                     </div>
-                  </div>
-
-                  {/* Hard-fail gates */}
-                  {riskData.gateResult.fails.length>0&&(
-                    <div style={{padding:"12px 16px",borderBottom:"1px solid #f3f4f6"}}>
-                      <div style={{fontSize:10,fontWeight:700,color:"#dc2626",textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:8}}>Hard-Fail Gates</div>
-                      {riskData.gateResult.fails.map((f,idx)=>(
-                        <div key={idx} style={{display:"flex",alignItems:"flex-start",gap:10,padding:"7px 0",borderBottom:idx<riskData.gateResult.fails.length-1?"1px solid #fef2f2":"none"}}>
-                          <span style={{fontSize:13,flexShrink:0}}>⛔</span>
-                          <div style={{flex:1}}>
-                            <div style={{fontSize:12,fontWeight:700,color:"#dc2626"}}>{f.rule} <span style={{color:"#374151",fontWeight:600}}>({f.value})</span></div>
-                            <div style={{fontSize:11,color:"#6b7280",marginTop:2}}>{f.consequence}</div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  {/* Score breakdown */}
-                  <div style={{padding:"14px 16px"}}>
-                    <div style={{fontSize:10,fontWeight:700,color:"#9ca3af",textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:10}}>Score Breakdown</div>
-                    {riskData.components.map(comp=>(
-                      <ScoreComponentBar key={comp.label} label={comp.label} score={comp.score} weight={comp.weight} color={comp.color}/>
-                    ))}
                   </div>
                 </div>
 
-                {/* B: Risk Diagnosis Cards */}
+                {/* B: PILLAR CARDS — structural, categorical, no weights */}
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
+
+                  {/* ── SURVIVAL PILLAR ── */}
+                  {(()=>{
+                    const d=survival;
+                    const isHardFail=d.label==="Fail"||d.label==="Structural Fail";
+                    const diagnosis=
+                      d.label==="Strong"?"Debt well covered. Vacancy buffer is healthy. Stress-tested as resilient.":
+                      d.label==="Stable"?"Coverage adequate. Manageable vacancy tolerance with limited stress margin.":
+                      d.label==="Fragile"?"Debt coverage fragile. One vacancy event could breach break-even.":
+                      d.label==="Critical"?"Near-zero margin. Minor stress event eliminates coverage.":
+                      d.label==="Structural Fail"?"Break-even requires 95%+ occupancy — structurally unsustainable.":
+                      "Debt service exceeds income. This deal cannot support its own leverage.";
+                    return(
+                      <div style={{background:"white",borderRadius:12,border:`2px solid ${d.color}${isHardFail?"":"25"}`,overflow:"hidden",boxShadow:isHardFail?`0 0 0 1px ${d.color}40`:"0 1px 4px rgba(0,0,0,0.05)"}}>
+                        <div style={{padding:"10px 14px",background:d.bg,borderBottom:`1.5px solid ${d.color}30`,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                          <div style={{display:"flex",alignItems:"center",gap:6}}>
+                            <span style={{fontSize:14}}>🧱</span>
+                            <span style={{fontSize:9,fontWeight:800,color:d.color,textTransform:"uppercase",letterSpacing:"0.08em"}}>Survival</span>
+                          </div>
+                          <span style={{fontSize:11,fontWeight:900,color:d.color,background:`${d.color}18`,padding:"2px 8px",borderRadius:100}}>{d.label}</span>
+                        </div>
+                        <div style={{padding:"12px 14px"}}>
+                          {[
+                            ["DSCR",           c.dscr.toFixed(2)+"x",       c.dscr>=1.25?"#059669":c.dscr>=1.05?"#d97706":"#dc2626"],
+                            ["Break-even",     (c.beo*100).toFixed(1)+"%",   c.beo<=0.85?"#059669":c.beo<=0.92?"#d97706":"#dc2626"],
+                            ["P(Neg CF)",      (monte?.pNegCF??50)+"%",      (monte?.pNegCF??50)<30?"#059669":(monte?.pNegCF??50)<60?"#d97706":"#dc2626"],
+                          ].map(([l,v,col])=>(
+                            <div key={l} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"4px 0",borderBottom:"1px solid #f9fafb",gap:4}}>
+                              <span style={{fontSize:11,color:"#9ca3af"}}>{l}</span>
+                              <span style={{fontSize:12,fontWeight:700,fontFamily:"'DM Mono',monospace",color:col}}>{v}</span>
+                            </div>
+                          ))}
+                          <div style={{marginTop:10,padding:"8px 10px",background:`${d.color}08`,borderRadius:8,border:`1px solid ${d.color}18`}}>
+                            <p style={{fontSize:10,color:"#374151",margin:0,lineHeight:1.5,fontStyle:"italic"}}>{diagnosis}</p>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {/* ── INCOME QUALITY PILLAR ── */}
+                  {(()=>{
+                    const d=income;
+                    const diagnosis=
+                      d.label==="Strong"?"Property generates distributable cash flow above institutional benchmarks.":
+                      d.label==="Moderate"?"Property pays modestly. Below benchmark but positive cash-on-cash.":
+                      "Property does not produce distributable income at current inputs.";
+                    return(
+                      <div style={{background:"white",borderRadius:12,border:`2px solid ${d.color}25`,overflow:"hidden",boxShadow:"0 1px 4px rgba(0,0,0,0.05)"}}>
+                        <div style={{padding:"10px 14px",background:d.bg,borderBottom:`1.5px solid ${d.color}30`,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                          <div style={{display:"flex",alignItems:"center",gap:6}}>
+                            <span style={{fontSize:14}}>💵</span>
+                            <span style={{fontSize:9,fontWeight:800,color:d.color,textTransform:"uppercase",letterSpacing:"0.08em"}}>Income</span>
+                          </div>
+                          <span style={{fontSize:11,fontWeight:900,color:d.color,background:`${d.color}18`,padding:"2px 8px",borderRadius:100}}>{d.label}</span>
+                        </div>
+                        <div style={{padding:"12px 14px"}}>
+                          {[
+                            ["Monthly CF",  fmtD(c.mcf)+"/mo",               c.mcf>=300?"#059669":c.mcf>=0?"#d97706":"#dc2626"],
+                            ["CoC Return",  fmtP(c.coc),                      c.coc>=0.08?"#059669":c.coc>=0.04?"#d97706":"#dc2626"],
+                            ["5yr Cash",    fmtD(income.cum5yrCF),             income.cum5yrCF>0?"#059669":"#dc2626"],
+                          ].map(([l,v,col])=>(
+                            <div key={l} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"4px 0",borderBottom:"1px solid #f9fafb",gap:4}}>
+                              <span style={{fontSize:11,color:"#9ca3af"}}>{l}</span>
+                              <span style={{fontSize:12,fontWeight:700,fontFamily:"'DM Mono',monospace",color:col}}>{v}</span>
+                            </div>
+                          ))}
+                          <div style={{marginTop:10,padding:"8px 10px",background:`${d.color}08`,borderRadius:8,border:`1px solid ${d.color}18`}}>
+                            <p style={{fontSize:10,color:"#374151",margin:0,lineHeight:1.5,fontStyle:"italic"}}>{diagnosis}</p>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {/* ── CAPITAL EFFICIENCY PILLAR ── */}
+                  {(()=>{
+                    const d=capital;
+                    const diagnosis=
+                      d.label==="Strong"?"Capital working efficiently across amortization and cash flow.":
+                      d.label==="Moderate"?"Capital growth driven primarily by amortization. Cash contribution limited.":
+                      "Capital barely recovering through operations. Returns depend heavily on appreciation.";
+                    return(
+                      <div style={{background:"white",borderRadius:12,border:`2px solid ${d.color}25`,overflow:"hidden",boxShadow:"0 1px 4px rgba(0,0,0,0.05)"}}>
+                        <div style={{padding:"10px 14px",background:d.bg,borderBottom:`1.5px solid ${d.color}30`,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                          <div style={{display:"flex",alignItems:"center",gap:6}}>
+                            <span style={{fontSize:14}}>🏦</span>
+                            <span style={{fontSize:9,fontWeight:800,color:d.color,textTransform:"uppercase",letterSpacing:"0.08em"}}>Capital</span>
+                          </div>
+                          <span style={{fontSize:11,fontWeight:900,color:d.color,background:`${d.color}18`,padding:"2px 8px",borderRadius:100}}>{d.label}</span>
+                        </div>
+                        <div style={{padding:"12px 14px"}}>
+                          {[
+                            ["Cash Required",  fmtD(c.ti),                                   "#374151"],
+                            ["5yr Paydown",    fmtD(capital.paydown5),                        "#059669"],
+                            ["Efficiency",     (capital.ratio*100).toFixed(0)+"%",             d.color],
+                          ].map(([l,v,col])=>(
+                            <div key={l} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"4px 0",borderBottom:"1px solid #f9fafb",gap:4}}>
+                              <span style={{fontSize:11,color:"#9ca3af"}}>{l}</span>
+                              <span style={{fontSize:12,fontWeight:700,fontFamily:"'DM Mono',monospace",color:col}}>{v}</span>
+                            </div>
+                          ))}
+                          <div style={{marginTop:10,padding:"8px 10px",background:`${d.color}08`,borderRadius:8,border:`1px solid ${d.color}18`}}>
+                            <p style={{fontSize:10,color:"#374151",margin:0,lineHeight:1.5,fontStyle:"italic"}}>{diagnosis}</p>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                </div>
+
+                {/* C: HARD FAIL SECTION */}
+                {riskData.gates.fails.length>0&&(
+                  <div style={{background:"#fef2f2",borderRadius:10,border:"1.5px solid #fecaca",padding:"12px 16px"}}>
+                    <div style={{fontSize:10,fontWeight:700,color:"#dc2626",textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:8}}>⛔ Hard-Fail Gates</div>
+                    {riskData.gates.fails.map((f,idx)=>(
+                      <div key={idx} style={{display:"flex",alignItems:"flex-start",gap:10,padding:"7px 0",borderBottom:idx<riskData.gates.fails.length-1?"1px solid #fecaca40":"none"}}>
+                        <span style={{fontSize:12,flexShrink:0}}>⛔</span>
+                        <div>
+                          <div style={{fontSize:12,fontWeight:700,color:"#dc2626"}}>{f.rule} <span style={{color:"#374151",fontWeight:600}}>({f.value})</span></div>
+                          <div style={{fontSize:11,color:"#6b7280",marginTop:1}}>{f.consequence}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* D: RISK DIAGNOSIS CARDS */}
                 {riskData.flags.length>0&&(
                   <div>
                     <div style={{fontSize:10,fontWeight:700,color:"#9ca3af",textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:8}}>Risk Diagnosis</div>
                     <div style={{display:"flex",flexDirection:"column",gap:8}}>
                       {riskData.flags.map((f,idx)=>{
-                        const sc=f.severity==="Critical"?"#dc2626":f.severity==="High"?"#ea580c":f.severity==="Structural"?"#7c3aed":"#d97706";
-                        const bg=f.severity==="Critical"?"#fef2f2":f.severity==="High"?"#fff7ed":f.severity==="Structural"?"#f5f3ff":"#fffbeb";
+                        const sc=f.severity==="Critical"?"#dc2626":f.severity==="Structural"?"#7c3aed":f.severity==="High"?"#ea580c":"#d97706";
+                        const bg=f.severity==="Critical"?"#fef2f2":f.severity==="Structural"?"#f5f3ff":f.severity==="High"?"#fff7ed":"#fffbeb";
                         return(
-                          <div key={idx} style={{background:bg,borderRadius:10,padding:"14px 16px",border:`1.5px solid ${sc}20`}}>
-                            <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",marginBottom:4,gap:8}}>
-                              <span style={{fontSize:11,fontWeight:800,color:sc,textTransform:"uppercase",letterSpacing:"0.05em"}}>{f.severity}</span>
-                              <span style={{fontSize:13,fontWeight:700,fontFamily:"'DM Mono',monospace",color:sc,flexShrink:0}}>{f.metric}</span>
+                          <div key={idx} style={{background:bg,borderRadius:10,padding:"13px 15px",border:`1.5px solid ${sc}20`}}>
+                            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:4,gap:8}}>
+                              <span style={{fontSize:10,fontWeight:800,color:sc,textTransform:"uppercase",letterSpacing:"0.05em"}}>{f.severity}</span>
+                              <span style={{fontSize:10,fontWeight:700,color:sc,background:`${sc}15`,padding:"1px 7px",borderRadius:100,textTransform:"uppercase",flexShrink:0}}>Fix: {f.lever}</span>
                             </div>
-                            <p style={{fontSize:12,color:"#374151",margin:"0 0 3px",fontWeight:600}}>{f.label}</p>
+                            <p style={{fontSize:13,color:"#111827",margin:"0 0 3px",fontWeight:700}}>{f.label}</p>
                             <p style={{fontSize:11,color:"#6b7280",margin:"0 0 3px",lineHeight:1.5}}>{f.cause}</p>
-                            <p style={{fontSize:11,color:"#6b7280",margin:"0 0 6px",lineHeight:1.5,fontStyle:"italic"}}>{f.consequence}</p>
-                            <span style={{fontSize:9,fontWeight:700,color:sc,background:`${sc}15`,padding:"2px 8px",borderRadius:100,textTransform:"uppercase"}}>Fix lever: {f.lever}</span>
+                            <p style={{fontSize:11,color:"#6b7280",margin:0,lineHeight:1.5,fontStyle:"italic"}}>{f.consequence}</p>
                           </div>
                         );
                       })}
@@ -1955,30 +2065,18 @@ function RentalCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro,al
                   </div>
                 )}
 
-                {/* C: Optimization Engine */}
+                {/* E: OPTIMIZATION ENGINE */}
                 <div style={{background:"white",borderRadius:12,border:"1.5px solid #bbf7d0",overflow:"hidden",boxShadow:"0 1px 4px rgba(0,0,0,0.05)"}}>
                   <div style={{padding:"12px 16px",background:"#f0fdf4",borderBottom:"1px solid #e0fce8",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
                     <div>
                       <div style={{fontSize:11,fontWeight:700,color:"#065f46",textTransform:"uppercase",letterSpacing:"0.06em"}}>🎯 Optimization Engine</div>
-                      <div style={{fontSize:10,color:"#6b7280"}}>Exact targets to reach your goal</div>
+                      <div style={{fontSize:10,color:"#6b7280"}}>Exact targets, ranked smallest % change first</div>
                     </div>
-                    <div style={{width:34,height:34,borderRadius:"50%",background:gc,display:"flex",alignItems:"center",justifyContent:"center",boxShadow:`0 0 0 3px ${gc}30`}}>
-                      <span style={{fontSize:15,fontWeight:900,color:"white",fontFamily:"'Fraunces',serif"}}>{riskData.grade}</span>
+                    <div style={{background:vBg,borderRadius:8,padding:"5px 10px",border:`1px solid ${vColor}30`}}>
+                      <span style={{fontSize:11,fontWeight:800,color:vColor}}>{verdict.icon} {verdict.label}</span>
                     </div>
                   </div>
 
-                  {/* Target selector */}
-                  <div style={{padding:"10px 16px",borderBottom:"1px solid #f3f4f6",display:"flex",gap:5,flexWrap:"wrap",alignItems:"center"}}>
-                    <div style={{fontSize:10,fontWeight:700,color:"#9ca3af",textTransform:"uppercase",letterSpacing:"0.06em",marginRight:4}}>Target:</div>
-                    {["8%CoC","DSCR1.25","$300CF","Stress"].map(t=>(
-                      <button key={t} onClick={()=>setOptTarget(t)}
-                        style={{padding:"4px 10px",borderRadius:100,border:`1.5px solid ${optTarget===t?"#059669":"#e5e7eb"}`,background:optTarget===t?"#f0fdf4":"white",color:optTarget===t?"#059669":"#6b7280",fontSize:10,fontWeight:700,cursor:"pointer"}}>
-                        {t==="8%CoC"?"8% CoC":t==="DSCR1.25"?"DSCR 1.25":t==="$300CF"?"$300/mo CF":"Stress Test"}
-                      </button>
-                    ))}
-                  </div>
-
-                  {/* Live KPIs */}
                   <div style={{padding:"12px 16px 6px"}}>
                     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:14}}>
                       {[
@@ -1993,7 +2091,6 @@ function RentalCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro,al
                       ))}
                     </div>
 
-                    {/* Sliders */}
                     <OSlider label="Purchase Price" value={pp} onChange={v=>setOptPP(v)}
                       min={Math.round(+i.pp*0.55)} max={Math.round(+i.pp*1.2)} step={5000}
                       display={v=>`$${Math.round(v/1000)}K`}/>
@@ -2003,67 +2100,91 @@ function RentalCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro,al
                     <OSlider label="Down Payment" value={down} onChange={v=>setOptDown(v)}
                       min={5} max={50} step={1} display={v=>`${v}%`}/>
 
-                    {/* Exact targets for selected goal */}
+                    <div style={{display:"flex",gap:5,flexWrap:"wrap",alignItems:"center",marginBottom:10,marginTop:4}}>
+                      <div style={{fontSize:10,fontWeight:700,color:"#9ca3af",textTransform:"uppercase",letterSpacing:"0.06em",marginRight:4}}>Target:</div>
+                      {["8% CoC","DSCR 1.25","$300/mo CF","Survive stress"].map(t=>(
+                        <button key={t} onClick={()=>setOptTarget(t)}
+                          style={{padding:"4px 10px",borderRadius:100,border:`1.5px solid ${optTarget===t?"#059669":"#e5e7eb"}`,background:optTarget===t?"#f0fdf4":"white",color:optTarget===t?"#059669":"#6b7280",fontSize:10,fontWeight:700,cursor:"pointer"}}>
+                          {t}
+                        </button>
+                      ))}
+                    </div>
+
                     {(()=>{
-                      const key=optTarget==="8%CoC"?"8% CoC":optTarget==="DSCR1.25"?"DSCR 1.25":optTarget==="$300CF"?"$300/mo CF":"Survive stress";
-                      const fix=riskData.fixTargets.find(f=>f.goal===key||f.goal.startsWith(key.split(" ")[0]));
-                      if(!fix) return null;
+                      const fix=riskData.fixTargets.find(f=>f.goal===optTarget||f.goal.includes(optTarget.split(" ")[0])||optTarget.includes(f.goal.split(" ")[0]));
+                      if(!fix) return(
+                        <div style={{padding:"10px",background:"#f0fdf4",borderRadius:8,textAlign:"center",fontSize:12,color:"#059669",fontWeight:700,marginBottom:10}}>✅ Already meets {optTarget}</div>
+                      );
                       return(
-                        <div style={{marginTop:4,marginBottom:10,padding:"12px",background:"#f9fafb",borderRadius:10,border:"1px solid #e5e7eb"}}>
-                          <div style={{fontSize:11,fontWeight:700,color:"#374151",marginBottom:8}}>To reach {fix.target}:</div>
+                        <div style={{padding:"12px",background:"#f9fafb",borderRadius:10,border:"1px solid #e5e7eb",marginBottom:10}}>
+                          <div style={{fontSize:11,fontWeight:700,color:"#374151",marginBottom:8}}>To reach <strong>{optTarget}</strong>, choose ONE:</div>
                           {fix.options.map((opt,oi)=>(
-                            <div key={oi} style={{display:"flex",alignItems:"center",gap:10,padding:"6px 0",borderBottom:oi<fix.options.length-1?"1px solid #f3f4f6":"none"}}>
-                              <span style={{fontSize:13}}>{opt.icon}</span>
-                              <span style={{fontSize:11,color:"#6b7280",flex:1}}>{opt.label}</span>
-                              <div style={{display:"flex",alignItems:"center",gap:6}}>
-                                <span style={{fontSize:12,fontWeight:800,fontFamily:"'DM Mono',monospace",color:"#059669"}}>{opt.value}</span>
-                                {opt.feasible===false&&<span style={{fontSize:9,color:"#dc2626",background:"#fef2f2",padding:"1px 5px",borderRadius:100,fontWeight:700}}>Hard</span>}
-                                {opt.feasible===true&&<span style={{fontSize:9,color:"#059669",background:"#f0fdf4",padding:"1px 5px",borderRadius:100,fontWeight:700}}>Feasible</span>}
+                            <div key={oi} style={{display:"flex",alignItems:"flex-start",gap:10,padding:"8px 0",borderBottom:oi<fix.options.length-1?"1px solid #f3f4f6":"none"}}>
+                              <span style={{fontSize:14,flexShrink:0,marginTop:1}}>{opt.icon}</span>
+                              <div style={{flex:1}}>
+                                <div style={{fontSize:11,color:"#374151",fontWeight:600,marginBottom:3}}>{opt.label}</div>
+                                <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                                  <span style={{fontSize:14,fontWeight:800,fontFamily:"'DM Mono',monospace",color:"#059669"}}>{opt.value}</span>
+                                  <span style={{fontSize:11,color:"#9ca3af",fontFamily:"'DM Mono',monospace"}}>{opt.delta}</span>
+                                  {opt.feasible===false&&<span style={{fontSize:9,color:"#dc2626",background:"#fef2f2",padding:"1px 5px",borderRadius:100,fontWeight:700}}>Hard</span>}
+                                  {opt.feasible===true&&<span style={{fontSize:9,color:"#059669",background:"#f0fdf4",padding:"1px 5px",borderRadius:100,fontWeight:700}}>✓ Feasible</span>}
+                                </div>
                               </div>
+                              {oi===0&&<span style={{fontSize:9,color:"#059669",background:"#f0fdf4",padding:"2px 7px",borderRadius:100,fontWeight:700,flexShrink:0,marginTop:2}}>Easiest</span>}
                             </div>
                           ))}
                         </div>
                       );
                     })()}
-
-                    {riskData.grade==="A"&&<div style={{padding:"10px",background:"#f0fdf4",borderRadius:10,border:"1.5px solid #bbf7d0",textAlign:"center",fontSize:13,fontWeight:700,color:"#059669",marginBottom:10}}>🎉 A-Grade under current assumptions</div>}
                   </div>
                 </div>
 
-                {/* D: Probability Engine */}
+                {/* F: PROBABILITY ENGINE */}
                 {monte&&(
                   <div style={{background:"white",borderRadius:12,border:"1.5px solid #e5e7eb",overflow:"hidden",boxShadow:"0 1px 4px rgba(0,0,0,0.05)"}}>
                     <div style={{padding:"11px 16px",borderBottom:"1px solid #f3f4f6",background:"#f5f3ff"}}>
                       <div style={{fontSize:11,fontWeight:700,color:"#6d28d9",textTransform:"uppercase",letterSpacing:"0.06em"}}>🎲 Probability Engine</div>
-                      <div style={{fontSize:9,color:"#9ca3af",marginTop:2}}>1,000 Monte Carlo simulations · Rent ±15%, Vacancy 0–20%, Expenses ±20%</div>
+                      <div style={{fontSize:9,color:"#9ca3af",marginTop:2}}>1,000 Monte Carlo trials · Rent ±15% · Vacancy 0–20% · Expenses ±20%</div>
                     </div>
                     <div style={{padding:"14px 16px",display:"flex",flexDirection:"column",gap:10}}>
                       <ProbabilityBar label="Negative Cash Flow" pct={monte.pNegCF}
-                        humanLabel={monte.pNegCF>=60?`${Math.round(monte.pNegCF/20)} in 5 scenarios lose money.`:monte.pNegCF>=40?"Nearly half of scenarios produce losses.":"Most scenarios maintain positive cash flow."}/>
+                        humanLabel={monte.pNegCF>=60?`${Math.round(monte.pNegCF/20)} in 5 scenarios lose money.`:monte.pNegCF>=40?"Nearly half of scenarios produce losses.":"Most scenarios stay cash-flow positive."}/>
                       <ProbabilityBar label="DSCR below 1.0" pct={monte.pDSCR}
-                        humanLabel={monte.pDSCR>=50?"More than half of scenarios breach lender minimum.":monte.pDSCR>=30?"Significant chance of debt coverage failure.":"Debt coverage holds in most scenarios."}/>
+                        humanLabel={monte.pDSCR>=50?"More than half breach lender minimum.":monte.pDSCR>=30?"Significant debt coverage risk.":"Debt coverage holds in most scenarios."}/>
                       <ProbabilityBar label="Capital Infusion Required" pct={monte.pCapInfusion}
-                        humanLabel={monte.pCapInfusion>=50?"1 in 2 scenarios require additional capital.":monte.pCapInfusion>=30?"Meaningful chance you'll need to inject capital.":"Capital call risk is low."}/>
+                        humanLabel={monte.pCapInfusion>=50?"1 in 2 scenarios require extra capital.":monte.pCapInfusion>=30?"Meaningful chance of capital call.":"Capital call risk is low."}/>
+                      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:4}}>
+                        {[
+                          ["Median outcome",fmtD(monte.median)+"/mo",monte.median>=0?"#059669":"#dc2626","50% of runs land here or better"],
+                          ["Worst 10%",fmtD(monte.worst10)+"/mo","#dc2626","Bottom decile outcome"],
+                        ].map(([l,v,col,sub])=>(
+                          <div key={l} style={{background:"#f9fafb",borderRadius:8,padding:"10px 12px"}}>
+                            <div style={{fontSize:9,color:"#9ca3af",textTransform:"uppercase",fontWeight:700,marginBottom:3}}>{l}</div>
+                            <div style={{fontSize:16,fontWeight:800,fontFamily:"'DM Mono',monospace",color:col}}>{v}</div>
+                            <div style={{fontSize:9,color:"#9ca3af",marginTop:2}}>{sub}</div>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   </div>
                 )}
 
-                {/* E: Liquidity */}
+                {/* G: LIQUIDITY */}
                 {liq&&(
                   <div style={{background:"white",borderRadius:12,border:"1.5px solid #e5e7eb",overflow:"hidden",boxShadow:"0 1px 4px rgba(0,0,0,0.05)"}}>
                     <div style={{padding:"11px 16px",borderBottom:"1px solid #f3f4f6",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
                       <div style={{display:"flex",alignItems:"center",gap:8}}>
                         <span style={{fontSize:14}}>💧</span>
-                        <span style={{fontSize:11,fontWeight:700,color:"#374151",textTransform:"uppercase",letterSpacing:"0.06em"}}>Liquidity Risk</span>
+                        <span style={{fontSize:11,fontWeight:700,color:"#374151",textTransform:"uppercase",letterSpacing:"0.06em"}}>Liquidity</span>
                       </div>
                       <span style={{fontSize:10,fontWeight:700,color:liq.riskColor,background:`${liq.riskColor}15`,padding:"3px 10px",borderRadius:100}}>{liq.riskLevel}</span>
                     </div>
                     <div style={{padding:"12px 16px",display:"flex",flexDirection:"column",gap:7}}>
                       {[
-                        ["Capital Required",fmtD(liq.capitalRequired),"#374151"],
-                        ["5-Yr Principal Paydown",fmtD(liq.principalPaydown5),"#059669"],
-                        ["Annual Cash Flow",fmtD(liq.annualCF),liq.annualCF>=0?"#059669":"#dc2626"],
-                        ["Years to Recover Capital",liq.yearsToRecover?`${liq.yearsToRecover} yrs`:"Never",liq.yearsToRecover&&liq.yearsToRecover<=12?"#d97706":"#dc2626"],
+                        ["Capital Required",      fmtD(liq.capitalRequired),   "#374151"],
+                        ["5-Yr Principal Paydown", fmtD(liq.principalPaydown5), "#059669"],
+                        ["Annual Cash Flow",        fmtD(liq.annualCF),          liq.annualCF>=0?"#059669":"#dc2626"],
+                        ["Capital Recovery Time",   capital.recovery?capital.recovery+" yrs":"Never", capital.recovery&&capital.recovery<=12?"#d97706":"#dc2626"],
                       ].map(([l,v,col])=>(
                         <div key={l} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"5px 0",borderBottom:"1px solid #f9fafb",gap:8}}>
                           <span style={{fontSize:12,color:"#6b7280",flex:1}}>{l}</span>
@@ -3400,148 +3521,134 @@ function VerificationModal({user,profile,onClose,onSubmitted}) {
   );
 }
 
-// ─── Portfolio Analyzer ────────────────────────────────────────────────────────
-// ─── PROPERTY SCORING ENGINE ───────────────────────────────────────────────────
-function scoreProperty(p) {
-  const val=parseFloat(p.value)||0;
-  const loan=parseFloat(p.loan_balance)||0;
-  const rent=parseFloat(p.monthly_rent)||0;
-  const exp=parseFloat(p.monthly_expenses)||0;
-  const mtg=parseFloat(p.monthly_mortgage)||0;
-  const rate=parseFloat(p.mortgage_rate)||7;
-  const term=parseFloat(p.mortgage_term)||30;
+// ─── PORTFOLIO RISK ENGINE ────────────────────────────────────────────────────
+function calcPortfolioRisk(propCalcs) {
+  if(!propCalcs||propCalcs.length===0) return null;
 
-  const mcf=rent-exp-mtg;
-  const acf=mcf*12;
-  const equity=val-loan;
-  const ltv=val>0?loan/val:0;
-  const noi=(rent-exp)*12;
-  const dscr=mtg>0?(rent-exp)/mtg:noi>0?99:0;
-  const coc=(val*0.2)>0?acf/(val*0.2):0; // rough CoC if no capital data
-  const expRatio=rent>0?(exp+mtg)/rent:0;
-  const breakEven=rent>0?(exp+mtg)/rent:0;
+  // Weighted avg DSCR
+  const totalDebt = propCalcs.reduce((s,p)=>s+(parseFloat(p.monthly_mortgage)||0),0);
+  const wDSCR = totalDebt>0
+    ? propCalcs.reduce((s,p)=>s+p.dscr*(parseFloat(p.monthly_mortgage)||0),0)/totalDebt
+    : 0;
 
-  // Weighted score 0-100
-  const cfScore=Math.min(Math.max((mcf/500)*25,0),25);
-  const cocScore=Math.min(Math.max((coc/0.12)*20,0),20);
-  const dscrScore=Math.min(Math.max(((dscr-1)/0.5)*20,0),20);
-  const ltvScore=Math.min(Math.max(((1-ltv)/0.4)*20,0),20);
-  const eqScore=Math.min(Math.max((equity/val/0.3)*15,0),15);
-  const score=Math.round(cfScore+cocScore+dscrScore+ltvScore+eqScore);
+  // Probability at least one property goes negative CF
+  // P(at least one) = 1 - ∏(1 - P(neg_i))
+  const pAtLeastOneNeg = 1 - propCalcs.reduce((prod,p)=>{
+    const pNeg = (p.pNegCF||50)/100; // use stored or default 50%
+    return prod * (1 - pNeg);
+  },1);
 
-  let grade,gradeColor,gradeBg,gradeIcon,gradePurpose;
-  if(score>=75){grade="Cash Cow";gradeColor="#059669";gradeBg="#f0fdf4";gradeIcon="🟢";gradePurpose="Hold long-term";}
-  else if(score>=58){grade="Equity Builder";gradeColor="#2563eb";gradeBg="#eff6ff";gradeIcon="🔵";gradePurpose="Refi candidate / appreciation play";}
-  else if(score>=42){grade="Balanced Asset";gradeColor="#d97706";gradeBg="#fffbeb";gradeIcon="🟡";gradePurpose="Steady portfolio filler";}
-  else if(score>=25){grade="Underperformer";gradeColor="#ea580c";gradeBg="#fff7ed";gradeIcon="🟠";gradePurpose="Optimize or refinance";}
-  else{grade="Risk Asset";gradeColor="#dc2626";gradeBg="#fef2f2";gradeIcon="🔴";gradePurpose="Consider restructuring or exit";}
+  // Portfolio P(neg CF) weighted by CF contribution
+  const totalAbsCF = propCalcs.reduce((s,p)=>s+Math.abs(p.mcf),1);
+  const portfolioPNeg = propCalcs.reduce((s,p)=>s+(p.pNegCF||50)*Math.abs(p.mcf)/totalAbsCF,0);
 
-  // Risk flags
-  const flags=[];
-  if(dscr<1.2&&dscr>0)flags.push("DSCR < 1.2");
-  if(ltv>0.8)flags.push("LTV > 80%");
-  if(mcf<0)flags.push("Negative CF");
-  if(expRatio>0.5)flags.push("Expenses > 50% of rent");
+  // Capital deployed (rough: equity = value - loan)
+  const capitalDeployed = propCalcs.reduce((s,p)=>s+((parseFloat(p.value)||0)-(parseFloat(p.loan_balance)||0)),0);
 
-  return{mcf,acf,equity,ltv,dscr,coc,noi,expRatio,breakEven,score,grade,gradeColor,gradeBg,gradeIcon,gradePurpose,flags};
+  // Concentration risk: largest single property CF as % of total portfolio CF
+  const totalCF = propCalcs.reduce((s,p)=>s+Math.max(p.mcf,0),0);
+  const maxSingleCF = Math.max(...propCalcs.map(p=>Math.max(p.mcf,0)),0);
+  const concentrationRisk = totalCF>0 ? maxSingleCF/totalCF : 0;
+
+  // Liquidity buffer required (monthly capital infusion if any go neg)
+  const negCFProps = propCalcs.filter(p=>p.mcf<0);
+  const liquidityBuffer = negCFProps.reduce((s,p)=>s+Math.abs(p.mcf),0);
+
+  // % properties in each survival state
+  const survivalStrong   = propCalcs.filter(p=>p.survivalLabel==="Strong").length;
+  const survivalFragile  = propCalcs.filter(p=>p.survivalLabel==="Fragile"||p.survivalLabel==="Critical").length;
+  const incomeWeak       = propCalcs.filter(p=>p.incomeLabel==="Weak").length;
+  const pctStrong        = propCalcs.length>0 ? survivalStrong/propCalcs.length : 0;
+  const pctFragile       = propCalcs.length>0 ? survivalFragile/propCalcs.length : 0;
+  const pctIncomeWeak    = propCalcs.length>0 ? incomeWeak/propCalcs.length : 0;
+
+  // Portfolio posture
+  let posture, postureColor, postureBg, postureIcon, postureDesc;
+  if(wDSCR>=1.30 && pctFragile<=0.10 && portfolioPNeg<25 && concentrationRisk<0.40) {
+    posture="Defensive"; postureColor="#059669"; postureBg="#f0fdf4"; postureIcon="🛡️";
+    postureDesc="Low risk across properties. Strong coverage with diversified cash flow.";
+  } else if(wDSCR>=1.15 && pctFragile<=0.30 && portfolioPNeg<45 && concentrationRisk<0.55) {
+    posture="Balanced"; postureColor="#2563eb"; postureBg="#eff6ff"; postureIcon="⚖️";
+    postureDesc="Mix of stable and moderate-risk assets. Manageable aggregate exposure.";
+  } else if(wDSCR>=1.05 && concentrationRisk>=0.40) {
+    posture="Levered"; postureColor="#d97706"; postureBg="#fffbeb"; postureIcon="📈";
+    postureDesc="Heavily reliant on one or two properties. Concentration amplifies risk.";
+  } else {
+    posture="Fragile"; postureColor="#dc2626"; postureBg="#fef2f2"; postureIcon="⚠️";
+    postureDesc="Multiple properties at risk. Portfolio resilience is low.";
+  }
+
+  return {
+    wDSCR, pAtLeastOneNeg:Math.min(1,pAtLeastOneNeg), portfolioPNeg,
+    capitalDeployed, concentrationRisk, liquidityBuffer,
+    pctStrong, pctFragile, pctIncomeWeak,
+    posture, postureColor, postureBg, postureIcon, postureDesc,
+    negCFProps: negCFProps.length,
+  };
 }
 
-// ─── REFI SIMULATOR ────────────────────────────────────────────────────────────
-function RefiSimulator({prop,onClose}) {
-  const [ltvPct,setLtvPct]=useState(75);
-  const [newRate,setNewRate]=useState(7.0);
-  const [newTerm,setNewTerm]=useState(30);
-  const [closingCosts,setClosingCosts]=useState(4000);
+// Portfolio stress test: −10% rent, 1 vacancy/property, +100bps rates
+function calcPortfolioStress(propCalcs) {
+  if(!propCalcs||propCalcs.length===0) return null;
+  const results = propCalcs.map(p=>{
+    const rent    = parseFloat(p.monthly_rent)||0;
+    const exp     = parseFloat(p.monthly_expenses)||0;
+    const mtg     = parseFloat(p.monthly_mortgage)||0;
+    const rate    = parseFloat(p.mortgage_rate)||7;
+    const loan    = parseFloat(p.loan_balance)||0;
+    const term    = parseFloat(p.mortgage_term)||30;
 
-  const val=parseFloat(prop.value)||0;
-  const currentLoan=parseFloat(prop.loan_balance)||0;
-  const rent=parseFloat(prop.monthly_rent)||0;
-  const exp=parseFloat(prop.monthly_expenses)||0;
-
-  const sim=useMemo(()=>{
-    const newLoan=val*ltvPct/100;
-    const cashOut=newLoan-currentLoan-closingCosts;
-    const r=newRate/100/12, n=newTerm*12;
-    const newPmt=r===0?newLoan/n:newLoan*(r*Math.pow(1+r,n))/(Math.pow(1+r,n)-1);
-    const newMcf=rent-exp-newPmt;
-    const newDscr=newPmt>0?(rent-exp)/newPmt:0;
-    const newLtv=val>0?newLoan/val:0;
-    const cashLeft=Math.max(0,currentLoan+closingCosts-newLoan);
-    const infinite=cashLeft<=0&&cashOut>0;
-    return{newLoan,cashOut,newPmt,newMcf,newDscr,newLtv,cashLeft,infinite};
-  },[val,currentLoan,ltvPct,newRate,newTerm,closingCosts,rent,exp]);
-
-  const dscrColor=sim.newDscr>=1.35?"#059669":sim.newDscr>=1.2?"#d97706":"#dc2626";
-
-  return (
-    <div onClick={e=>e.target===e.currentTarget&&onClose()} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",backdropFilter:"blur(4px)",zIndex:600,display:"flex",alignItems:"center",justifyContent:"center",padding:24}}>
-      <div style={{background:"white",borderRadius:20,padding:32,maxWidth:520,width:"100%",boxShadow:"0 24px 60px rgba(0,0,0,0.15)",animation:"popIn 0.2s cubic-bezier(0.34,1.56,0.64,1) both"}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:20}}>
-          <div>
-            <h3 style={{fontFamily:"'Fraunces',serif",fontSize:20,fontWeight:800,color:"#111827",marginBottom:3}}>Refi Simulator</h3>
-            <p style={{fontSize:12,color:"#9ca3af"}}>{prop.address}</p>
-          </div>
-          <button onClick={onClose} style={{background:"none",border:"none",fontSize:18,cursor:"pointer",color:"#9ca3af"}}>✕</button>
-        </div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:20}}>
-          {[["New LTV %",ltvPct,setLtvPct,"%"],["New Rate %",newRate,setNewRate,"%"],["New Term",newTerm,setNewTerm,"yr"],["Closing Costs",closingCosts,setClosingCosts,"$"]].map(([label,val,setter,unit])=>(
-            <div key={label} style={{display:"flex",flexDirection:"column",gap:4}}>
-              <label style={{fontSize:11,fontWeight:600,color:"#6b7280",textTransform:"uppercase"}}>{label}</label>
-              <div style={{display:"flex",alignItems:"center",background:"#f9fafb",border:"1.5px solid #e5e7eb",borderRadius:8,overflow:"hidden"}}>
-                {unit==="$"&&<span style={{padding:"0 8px",color:"#9ca3af",fontSize:12,background:"#f3f4f6",borderRight:"1px solid #e5e7eb"}}>$</span>}
-                <input type="number" value={val} onChange={e=>setter(+e.target.value)} style={{flex:1,background:"transparent",border:"none",outline:"none",padding:"8px 10px",fontSize:13,fontFamily:"'DM Mono',monospace",color:"#111827"}}/>
-                {unit!=="$"&&<span style={{padding:"0 8px",color:"#9ca3af",fontSize:12,background:"#f3f4f6",borderLeft:"1px solid #e5e7eb"}}>{unit}</span>}
-              </div>
-            </div>
-          ))}
-        </div>
-        {/* Results */}
-        <div style={{background:sim.infinite?"linear-gradient(135deg,#064e3b,#065f46)":"#f9fafb",borderRadius:12,padding:"16px 18px",marginBottom:14}}>
-          <div style={{fontSize:10,fontWeight:700,color:sim.infinite?"rgba(255,255,255,0.6)":"#9ca3af",textTransform:"uppercase",marginBottom:8}}>Cash Out</div>
-          <div style={{fontSize:26,fontWeight:800,fontFamily:"'DM Mono',monospace",color:sim.infinite?"#6ee7b7":sim.cashOut>=0?"#059669":"#dc2626"}}>{sim.cashOut>=0?fmtD(sim.cashOut):`Need ${fmtD(-sim.cashOut)} more equity`}</div>
-          {sim.infinite&&<div style={{fontSize:11,color:"rgba(255,255,255,0.7)",marginTop:3}}>∞ Infinite return — all capital recycled!</div>}
-        </div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
-          {[["New Loan",fmtD(sim.newLoan),""],["New Payment",fmtD(sim.newPmt)+"/mo",""],["New Cash Flow",fmtD(sim.newMcf)+"/mo",sim.newMcf>=0?"pos":sim.newMcf<0?"neg":""],["New DSCR",sim.newDscr.toFixed(2)+"x",""]].map(([l,v,flag])=>(
-            <div key={l} style={{background:flag==="pos"?"#f0fdf4":flag==="neg"?"#fef2f2":"#f9fafb",borderRadius:10,padding:"12px 14px",border:`1px solid ${flag==="pos"?"#bbf7d0":flag==="neg"?"#fecaca":"#e5e7eb"}`}}>
-              <div style={{fontSize:9,color:"#9ca3af",fontWeight:700,textTransform:"uppercase",marginBottom:4}}>{l}</div>
-              <div style={{fontSize:16,fontWeight:800,fontFamily:"'DM Mono',monospace",color:flag==="pos"?"#059669":flag==="neg"?"#dc2626":l==="New DSCR"?dscrColor:"#111827"}}>{v}</div>
-            </div>
-          ))}
-        </div>
-        <div style={{display:"flex",justifyContent:"space-between",padding:"10px 14px",background:"#fffbeb",borderRadius:8,border:"1px solid #fde68a"}}>
-          <span style={{fontSize:12,color:"#92400e"}}>Cash Left in Deal</span>
-          <span style={{fontSize:13,fontWeight:800,fontFamily:"'DM Mono',monospace",color:sim.cashLeft===0?"#059669":"#374151"}}>{sim.cashLeft===0?"$0 — Fully Recycled 🎯":fmtD(sim.cashLeft)}</span>
-        </div>
-      </div>
-    </div>
-  );
+    const sRent = rent * 0.90;                   // −10% rent
+    const vacLoss = sRent / 12;                  // ~1 month vacancy
+    const rr = (rate+1)/100/12, n=term*12;
+    const sMtg = loan>0&&rr>0 ? loan*(rr*Math.pow(1+rr,n))/(Math.pow(1+rr,n)-1) : mtg; // +100bps
+    const sMCF = sRent - vacLoss/12 - exp - sMtg; // rough monthly
+    const sDSCR = sMtg>0 ? (sRent-vacLoss/12-exp)/sMtg : 0;
+    return {address:p.address, baseMCF:p.mcf, stressMCF:Math.round(sMCF), sDSCR:+sDSCR.toFixed(2), goesNeg:sMCF<0};
+  });
+  const totalStressCF = results.reduce((s,r)=>s+r.stressMCF,0);
+  const propsGoNeg = results.filter(r=>r.goesNeg).length;
+  const capitalShortfall = results.filter(r=>r.goesNeg).reduce((s,r)=>s+Math.abs(r.stressMCF),0);
+  return {results, totalStressCF:Math.round(totalStressCF), propsGoNeg, capitalShortfall:Math.round(capitalShortfall)};
 }
 
-// ─── PORTFOLIO ANALYZER (Full Pro Version) ────────────────────────────────────
+// ─── PORTFOLIO ANALYZER v2 — Risk Intelligence Edition ────────────────────────
 function PortfolioAnalyzer({profile,onSave}) {
   const [properties,setProperties]=useState(profile?.portfolio_properties||[]);
   const [showAdd,setShowAdd]=useState(false);
   const [refiProp,setRefiProp]=useState(null);
   const [expandedProp,setExpandedProp]=useState(null);
-  const [portfolioTab,setPortfolioTab]=useState("properties"); // properties | projections | risks
+  const [portfolioTab,setPortfolioTab]=useState("properties"); // properties | risk | projections
   const [newProp,setNewProp]=useState({
     address:"",type:"Single Family",value:"",loan_balance:"",
     monthly_rent:"",monthly_expenses:"",monthly_mortgage:"",
     mortgage_rate:"7",mortgage_term:"30",notes:"",
+    pNegCF:50, // estimated % probability of negative CF
   });
   const [projYears,setProjYears]=useState(5);
   const [projGrowth,setProjGrowth]=useState(4);
   const [projRentGrowth,setProjRentGrowth]=useState(2);
   const [projExpGrowth,setProjExpGrowth]=useState(2);
-  const [projAcqTemplate,setProjAcqTemplate]=useState("rental");
   const [projAcqValue,setProjAcqValue]=useState(250000);
   const [projAcqCF,setProjAcqCF]=useState(400);
   const [projAcqCount,setProjAcqCount]=useState(1);
   const np=k=>v=>setNewProp(p=>({...p,[k]:v}));
 
-  // Per-property calcs
-  const propCalcs=useMemo(()=>properties.map(p=>({...p,...scoreProperty(p)})),[properties]);
+  // Per-property calcs — augment scoreProperty with pillar labels
+  const propCalcs=useMemo(()=>properties.map(p=>{
+    const base=scoreProperty(p);
+    // Derive pillar labels for aggregation
+    const dscr=base.dscr, beo=base.breakEven, mcf=base.mcf, coc=base.coc;
+    const survivalLabel=
+      dscr<1.0||beo>=0.95?"Fail":
+      dscr>=1.25&&(1-beo)>=0.10?"Strong":
+      dscr<1.05||(1-beo)<0.05?"Critical":
+      dscr<1.25||(1-beo)<0.10?"Fragile":"Stable";
+    const incomeLabel=
+      mcf>=300&&coc>=0.08?"Strong":
+      mcf<=0||coc<0.04?"Weak":"Moderate";
+    return {...p,...base,survivalLabel,incomeLabel};
+  }),[properties]);
 
   // Portfolio totals
   const totals=useMemo(()=>{
@@ -3555,43 +3662,35 @@ function PortfolioAnalyzer({profile,onSave}) {
     const wdscr=tdebt>0?propCalcs.reduce((s,p)=>s+p.dscr*(parseFloat(p.monthly_mortgage)||0),0)/tdebt:0;
     const wltv=tv>0?tl/tv:0;
     const coc=te>0?tacf/te:0;
-    const capitalDeployed=propCalcs.reduce((s,p)=>s+(parseFloat(p.value)||0)*0.2,0); // rough
-    const riskCount=propCalcs.filter(p=>p.flags.length>0).length;
-    return{tv,tl,te,tmcf,tacf,tnoi,wdscr,wltv,coc,capitalDeployed,riskCount,count:properties.length};
+    return{tv,tl,te,tmcf,tacf,tnoi,wdscr,wltv,coc,count:properties.length};
   },[propCalcs]);
 
-  // Grade distribution
-  const gradeDist=useMemo(()=>{
-    const grades={};
-    propCalcs.forEach(p=>{grades[p.grade]=(grades[p.grade]||0)+1;});
-    return grades;
-  },[propCalcs]);
+  const riskData=useMemo(()=>calcPortfolioRisk(propCalcs),[propCalcs]);
+  const stressData=useMemo(()=>calcPortfolioStress(propCalcs),[propCalcs]);
 
   // Projections
   const projections=useMemo(()=>{
     return Array.from({length:projYears+1},(_,yr)=>{
       const valY=totals.tv*Math.pow(1+projGrowth/100,yr);
-      const loanY=totals.tl*(1-yr/(30)); // rough paydown
+      const loanY=totals.tl*(1-yr/30);
       const equityY=valY-Math.max(loanY,0);
-      const rentGrowthFactor=Math.pow(1+projRentGrowth/100,yr);
-      const expGrowthFactor=Math.pow(1+projExpGrowth/100,yr);
+      const rentGF=Math.pow(1+projRentGrowth/100,yr);
+      const expGF=Math.pow(1+projExpGrowth/100,yr);
       const baseMcf=propCalcs.reduce((s,p)=>{
-        const rentY=(parseFloat(p.monthly_rent)||0)*rentGrowthFactor;
-        const expY=(parseFloat(p.monthly_expenses)||0)*expGrowthFactor;
-        return s+rentY-expY-(parseFloat(p.monthly_mortgage)||0);
+        const r=(parseFloat(p.monthly_rent)||0)*rentGF;
+        const e=(parseFloat(p.monthly_expenses)||0)*expGF;
+        return s+r-e-(parseFloat(p.monthly_mortgage)||0);
       },0);
-      const newUnitsCF=yr>0?projAcqCount*yr*projAcqCF:0;
-      const newUnitsVal=yr>0?projAcqCount*yr*projAcqValue*Math.pow(1+projGrowth/100,yr/2):0;
-      return{yr,val:Math.round(valY+newUnitsVal),equity:Math.round(equityY+newUnitsVal*0.2),mcf:Math.round(baseMcf+newUnitsCF),props:totals.count+(yr>0?projAcqCount*yr:0)};
+      const newCF=yr>0?projAcqCount*yr*projAcqCF:0;
+      const newVal=yr>0?projAcqCount*yr*projAcqValue*Math.pow(1+projGrowth/100,yr/2):0;
+      return{yr,val:Math.round(valY+newVal),equity:Math.round(equityY+newVal*0.2),mcf:Math.round(baseMcf+newCF),props:totals.count+(yr>0?projAcqCount*yr:0)};
     });
   },[totals,propCalcs,projYears,projGrowth,projRentGrowth,projExpGrowth,projAcqCount,projAcqValue,projAcqCF]);
-
-  const maxProjVal=Math.max(...projections.map(p=>p.val),1);
 
   const addProp=()=>{
     if(!newProp.address)return;
     setProperties(prev=>[...prev,{...newProp,id:Date.now().toString()}]);
-    setNewProp({address:"",type:"Single Family",value:"",loan_balance:"",monthly_rent:"",monthly_expenses:"",monthly_mortgage:"",mortgage_rate:"7",mortgage_term:"30",notes:""});
+    setNewProp({address:"",type:"Single Family",value:"",loan_balance:"",monthly_rent:"",monthly_expenses:"",monthly_mortgage:"",mortgage_rate:"7",mortgage_term:"30",notes:"",pNegCF:50});
     setShowAdd(false);
   };
   const removeProp=id=>setProperties(p=>p.filter(x=>x.id!==id));
@@ -3601,223 +3700,324 @@ function PortfolioAnalyzer({profile,onSave}) {
     <div style={{display:"flex",flexDirection:"column",gap:20}}>
       {refiProp&&<RefiSimulator prop={refiProp} onClose={()=>setRefiProp(null)}/>}
 
-      {/* ── DASHBOARD SUMMARY ── */}
-      <div style={{background:"linear-gradient(135deg,#064e3b,#065f46)",borderRadius:18,padding:"24px 28px"}}>
-        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:20,flexWrap:"wrap",gap:10}}>
+      {/* ── DASHBOARD HEADER ── */}
+      <div style={{background:"linear-gradient(135deg,#0f172a 0%,#1a2744 100%)",borderRadius:18,padding:"24px 28px",boxShadow:"0 6px 28px rgba(0,0,0,0.22)"}}>
+        <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",marginBottom:20,flexWrap:"wrap",gap:12}}>
           <div>
-            <h2 style={{fontFamily:"'Fraunces',serif",fontSize:20,fontWeight:800,color:"white",marginBottom:3}}>Portfolio Dashboard</h2>
-            <p style={{fontSize:12,color:"rgba(255,255,255,0.5)"}}>{totals.count} propert{totals.count===1?"y":"ies"} · Live calculations</p>
+            <h2 style={{fontFamily:"'Fraunces',serif",fontSize:20,fontWeight:800,color:"white",marginBottom:3}}>Portfolio Risk Dashboard</h2>
+            <p style={{fontSize:12,color:"rgba(255,255,255,0.4)"}}>{totals.count} propert{totals.count===1?"y":"ies"} · Decision Intelligence</p>
           </div>
-          {totals.riskCount>0&&<div style={{background:"rgba(220,38,38,0.2)",border:"1px solid rgba(220,38,38,0.4)",borderRadius:8,padding:"6px 12px"}}><span style={{fontSize:12,color:"#fca5a5",fontWeight:700}}>⚠️ {totals.riskCount} propert{totals.riskCount===1?"y":"ies"} need attention</span></div>}
+          {/* Portfolio posture badge */}
+          {riskData&&(
+            <div style={{background:riskData.postureBg,borderRadius:10,padding:"8px 14px",border:`1.5px solid ${riskData.postureColor}30`}}>
+              <div style={{fontSize:9,color:"#9ca3af",textTransform:"uppercase",fontWeight:700,marginBottom:2}}>Portfolio Posture</div>
+              <div style={{fontSize:16,fontWeight:900,color:riskData.postureColor}}>{riskData.postureIcon} {riskData.posture}</div>
+            </div>
+          )}
         </div>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:12}}>
+
+        {/* KPI strip */}
+        <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:1,background:"rgba(255,255,255,0.05)",borderRadius:10,overflow:"hidden",marginBottom:16}}>
           {[
-            ["Total Value",fmtM(totals.tv),"#6ee7b7"],
-            ["Total Equity",fmtM(totals.te),"#a78bfa"],
-            ["Total Loan",fmtM(totals.tl),"#fde68a"],
-            ["Mo. Cash Flow",fmtD(totals.tmcf),totals.tmcf>=0?"#6ee7b7":"#fca5a5"],
-            ["Annual CF",fmtD(totals.tacf),totals.tacf>=0?"#6ee7b7":"#fca5a5"],
-            ["Avg DSCR",totals.wdscr.toFixed(2)+"x",totals.wdscr>=1.35?"#6ee7b7":totals.wdscr>=1.2?"#fde68a":"#fca5a5"],
-            ["Avg LTV",fmtP(totals.wltv),totals.wltv<=0.75?"#6ee7b7":totals.wltv<=0.85?"#fde68a":"#fca5a5"],
-            ["Portfolio CoC",fmtP(totals.coc),totals.coc>=0.08?"#6ee7b7":"#fde68a"],
-          ].map(([label,val,color])=>(
-            <div key={label} style={{background:"rgba(255,255,255,0.07)",borderRadius:12,padding:"14px 12px",border:"1px solid rgba(255,255,255,0.1)"}}>
-              <div style={{fontSize:9,color:"rgba(255,255,255,0.45)",fontWeight:700,textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:6}}>{label}</div>
-              <div style={{fontSize:17,fontWeight:800,fontFamily:"'DM Mono',monospace",color}}>{val}</div>
+            ["Total CF",    fmtD(totals.tmcf)+"/mo", totals.tmcf>=0?"#6ee7b7":"#fca5a5"],
+            ["Avg DSCR",    totals.wdscr.toFixed(2)+"x", totals.wdscr>=1.25?"#6ee7b7":totals.wdscr>=1.10?"#fde68a":"#fca5a5"],
+            ["Capital",     fmtM(riskData?.capitalDeployed??0), "#e2e8f0"],
+            ["P(One Neg)",  riskData?Math.round(riskData.pAtLeastOneNeg*100)+"%":"—", riskData&&riskData.pAtLeastOneNeg<0.30?"#6ee7b7":riskData&&riskData.pAtLeastOneNeg<0.60?"#fde68a":"#fca5a5"],
+            ["Liquidity",   fmtD(riskData?.liquidityBuffer??0)+"/mo", "#e2e8f0"],
+          ].map(([l,v,col])=>(
+            <div key={l} style={{padding:"10px 8px",textAlign:"center"}}>
+              <div style={{fontSize:8,color:"rgba(255,255,255,0.3)",textTransform:"uppercase",fontWeight:700,letterSpacing:"0.06em",marginBottom:3}}>{l}</div>
+              <div style={{fontSize:12,fontWeight:800,fontFamily:"'DM Mono',monospace",color:col}}>{v}</div>
             </div>
           ))}
         </div>
-        {/* LTV bar */}
-        {totals.tv>0&&<div style={{marginTop:18}}>
-          <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
-            <span style={{fontSize:11,color:"rgba(255,255,255,0.5)"}}>Portfolio Equity vs Debt</span>
-            <span style={{fontSize:11,color:"rgba(255,255,255,0.5)"}}>{fmtP(1-totals.wltv)} equity · {fmtP(totals.wltv)} debt</span>
+
+        {/* Risk aggregation row */}
+        {riskData&&(
+          <div style={{background:"rgba(255,255,255,0.05)",borderRadius:10,padding:"12px 16px",border:"1px solid rgba(255,255,255,0.08)"}}>
+            <div style={{fontSize:9,color:"rgba(255,255,255,0.3)",textTransform:"uppercase",fontWeight:700,letterSpacing:"0.06em",marginBottom:8}}>Portfolio Risk Aggregation</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
+              {[
+                {label:"P(At Least 1 Neg)", value:Math.round(riskData.pAtLeastOneNeg*100)+"%",
+                 sub:"Probability any property goes negative", color:riskData.pAtLeastOneNeg<0.30?"#6ee7b7":riskData.pAtLeastOneNeg<0.60?"#fde68a":"#fca5a5"},
+                {label:"Concentration Risk", value:Math.round(riskData.concentrationRisk*100)+"%",
+                 sub:"Largest property's share of portfolio CF", color:riskData.concentrationRisk<0.40?"#6ee7b7":riskData.concentrationRisk<0.55?"#fde68a":"#fca5a5"},
+                {label:"Weighted Avg DSCR", value:totals.wdscr.toFixed(2)+"x",
+                 sub:"Debt service coverage across portfolio", color:totals.wdscr>=1.25?"#6ee7b7":totals.wdscr>=1.10?"#fde68a":"#fca5a5"},
+              ].map(({label,value,sub,color})=>(
+                <div key={label} style={{background:"rgba(255,255,255,0.05)",borderRadius:8,padding:"10px 12px"}}>
+                  <div style={{fontSize:9,color:"rgba(255,255,255,0.35)",textTransform:"uppercase",fontWeight:700,marginBottom:4}}>{label}</div>
+                  <div style={{fontSize:18,fontWeight:900,fontFamily:"'DM Mono',monospace",color,marginBottom:3}}>{value}</div>
+                  <div style={{fontSize:9,color:"rgba(255,255,255,0.25)",lineHeight:1.3}}>{sub}</div>
+                </div>
+              ))}
+            </div>
+            <div style={{marginTop:10,padding:"8px 12px",background:`${riskData.postureColor}15`,borderRadius:8,border:`1px solid ${riskData.postureColor}25`}}>
+              <span style={{fontSize:10,color:riskData.postureColor,fontWeight:700}}>{riskData.postureIcon} {riskData.posture}: </span>
+              <span style={{fontSize:10,color:"rgba(255,255,255,0.5)"}}>{riskData.postureDesc}</span>
+            </div>
           </div>
-          <div style={{height:8,background:"rgba(255,255,255,0.1)",borderRadius:4,overflow:"hidden",display:"flex"}}>
-            <div style={{width:`${(1-totals.wltv)*100}%`,background:"linear-gradient(90deg,#10b981,#6ee7b7)",transition:"width 0.5s"}}/>
-          </div>
-        </div>}
+        )}
       </div>
 
-      {/* Grade distribution chips */}
-      {properties.length>0&&(
-        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-          {Object.entries(gradeDist).map(([grade,count])=>{
-            const g=propCalcs.find(p=>p.grade===grade);
-            return <div key={grade} style={{display:"flex",alignItems:"center",gap:6,padding:"6px 14px",borderRadius:100,background:g?.gradeBg||"#f3f4f6",border:`1.5px solid ${g?.gradeColor||"#e5e7eb"}20`}}>
-              <span style={{fontSize:13}}>{g?.gradeIcon}</span>
-              <span style={{fontSize:12,fontWeight:700,color:g?.gradeColor||"#374151"}}>{grade}</span>
-              <span style={{fontSize:11,color:g?.gradeColor||"#9ca3af",opacity:0.7}}>×{count}</span>
-            </div>;
-          })}
-        </div>
-      )}
-
-      {/* Tabs */}
-      <div style={{display:"flex",background:"#f3f4f6",borderRadius:10,padding:3,gap:2}}>
-        {[["properties","🏠 Properties"],["projections","🔮 Projections"],["risks","⚠️ Risk Report"]].map(([key,label])=>(
+      {/* ── TABS ── */}
+      <div style={{display:"flex",background:"#f3f4f6",borderRadius:10,padding:4,gap:3}}>
+        {[["properties","🏘️ Properties"],["risk","⚠️ Risk Intelligence"],["projections","📈 Projections"]].map(([key,label])=>(
           <button key={key} onClick={()=>setPortfolioTab(key)} style={{flex:1,padding:"8px 12px",borderRadius:8,border:"none",background:portfolioTab===key?"white":"transparent",color:portfolioTab===key?"#111827":"#6b7280",fontSize:12,fontWeight:portfolioTab===key?700:500,cursor:"pointer",boxShadow:portfolioTab===key?"0 1px 4px rgba(0,0,0,0.08)":"none",transition:"all 0.15s"}}>{label}</button>
         ))}
       </div>
 
       {/* ── PROPERTIES TAB ── */}
       {portfolioTab==="properties"&&(
-        <div style={{background:"white",borderRadius:14,border:"1.5px solid #e5e7eb",overflow:"hidden"}}>
-          <div style={{padding:"16px 22px",borderBottom:"1px solid #f3f4f6",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-            <h3 style={{fontSize:15,fontWeight:700,color:"#111827"}}>My Properties</h3>
-            <button onClick={()=>setShowAdd(v=>!v)} style={{display:"flex",alignItems:"center",gap:6,padding:"7px 14px",borderRadius:8,border:"1.5px solid #bbf7d0",background:"#f0fdf4",color:"#059669",fontSize:12,fontWeight:700,cursor:"pointer"}}>+ Add Property</button>
-          </div>
+        <div style={{display:"flex",flexDirection:"column",gap:12}}>
+          {properties.length===0?(
+            <div style={{textAlign:"center",padding:"48px 24px",background:"white",borderRadius:16,border:"2px dashed #e5e7eb"}}>
+              <div style={{fontSize:36,marginBottom:12}}>🏘️</div>
+              <h3 style={{fontSize:16,fontWeight:700,color:"#374151",marginBottom:6}}>No properties yet</h3>
+              <p style={{fontSize:13,color:"#9ca3af",marginBottom:16}}>Add your properties to analyze portfolio risk and aggregated metrics.</p>
+              <button onClick={()=>setShowAdd(true)} style={{padding:"10px 20px",borderRadius:10,border:"none",background:"#059669",color:"white",fontSize:13,fontWeight:700,cursor:"pointer"}}>+ Add First Property</button>
+            </div>
+          ):(
+            propCalcs.map(p=>{
+              const isExp=expandedProp===p.id;
+              const sColor=p.survivalLabel==="Strong"?"#059669":p.survivalLabel==="Stable"?"#2563eb":p.survivalLabel==="Fragile"?"#d97706":"#dc2626";
+              const iColor=p.incomeLabel==="Strong"?"#059669":p.incomeLabel==="Moderate"?"#2563eb":"#dc2626";
+              return(
+                <div key={p.id} style={{background:"white",borderRadius:14,border:"1.5px solid #f0f0f0",overflow:"hidden",boxShadow:"0 1px 4px rgba(0,0,0,0.04)"}}>
+                  <div style={{padding:"14px 16px",display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:10,cursor:"pointer"}} onClick={()=>setExpandedProp(isExp?null:p.id)}>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4,flexWrap:"wrap"}}>
+                        <span style={{fontSize:13,fontWeight:700,color:"#111827",flex:1,minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{p.address||"Unnamed Property"}</span>
+                        <span style={{fontSize:9,color:"#9ca3af",background:"#f3f4f6",padding:"2px 7px",borderRadius:100,flexShrink:0}}>{p.type}</span>
+                      </div>
+                      {/* Pillar badges */}
+                      <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+                        {[
+                          {label:p.survivalLabel,color:sColor,icon:"🧱"},
+                          {label:p.incomeLabel,  color:iColor,icon:"💵"},
+                        ].map(({label,color,icon})=>(
+                          <span key={icon} style={{fontSize:9,fontWeight:700,color,background:`${color}15`,padding:"2px 7px",borderRadius:100}}>{icon} {label}</span>
+                        ))}
+                        {p.mcf>=0?<span style={{fontSize:9,color:"#059669",background:"#f0fdf4",padding:"2px 7px",borderRadius:100,fontWeight:700}}>{fmtD(p.mcf)}/mo</span>:<span style={{fontSize:9,color:"#dc2626",background:"#fef2f2",padding:"2px 7px",borderRadius:100,fontWeight:700}}>{fmtD(p.mcf)}/mo</span>}
+                        {p.flags.map(f=><span key={f} style={{fontSize:9,color:"#ea580c",background:"#fff7ed",padding:"2px 7px",borderRadius:100,fontWeight:600}}>{f}</span>)}
+                      </div>
+                    </div>
+                    <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
+                      <div style={{textAlign:"right"}}>
+                        <div style={{fontSize:14,fontWeight:800,fontFamily:"'DM Mono',monospace",color:"#111827"}}>{fmtM(parseFloat(p.value)||0)}</div>
+                        <div style={{fontSize:10,color:"#9ca3af"}}>{fmtD(p.equity)} equity</div>
+                      </div>
+                      <span style={{fontSize:11,color:"#9ca3af",transition:"transform 0.2s",transform:isExp?"rotate(180deg)":"none"}}>▼</span>
+                    </div>
+                  </div>
+
+                  {isExp&&(
+                    <div style={{borderTop:"1px solid #f3f4f6",padding:"14px 16px",background:"#fafafa"}}>
+                      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginBottom:14}}>
+                        {[
+                          ["DSCR",       p.dscr.toFixed(2)+"x",   p.dscr>=1.25?"#059669":p.dscr>=1.0?"#d97706":"#dc2626"],
+                          ["Break-even", fmtP(p.breakEven),        p.breakEven<=0.85?"#059669":p.breakEven<=0.92?"#d97706":"#dc2626"],
+                          ["CoC",        fmtP(p.coc),              p.coc>=0.08?"#059669":p.coc>=0.04?"#d97706":"#dc2626"],
+                          ["Equity",     fmtD(p.equity),           "#374151"],
+                          ["LTV",        fmtP(p.ltv),              p.ltv<=0.75?"#059669":p.ltv<=0.85?"#d97706":"#dc2626"],
+                          ["NOI/yr",     fmtD(p.noi),              p.noi>0?"#059669":"#dc2626"],
+                        ].map(([l,v,col])=>(
+                          <div key={l} style={{background:"white",borderRadius:8,padding:"8px 10px",border:"1px solid #f0f0f0"}}>
+                            <div style={{fontSize:9,color:"#9ca3af",textTransform:"uppercase",fontWeight:700,marginBottom:2}}>{l}</div>
+                            <div style={{fontSize:13,fontWeight:800,fontFamily:"'DM Mono',monospace",color:col}}>{v}</div>
+                          </div>
+                        ))}
+                      </div>
+                      <div style={{display:"flex",gap:6}}>
+                        <button onClick={()=>setRefiProp(p)} style={{flex:1,padding:"8px",borderRadius:8,border:"1.5px solid #e5e7eb",background:"white",fontSize:11,fontWeight:700,cursor:"pointer",color:"#374151"}}>♻️ Refi Sim</button>
+                        <button onClick={()=>removeProp(p.id)} style={{padding:"8px 12px",borderRadius:8,border:"1.5px solid #fee2e2",background:"#fef2f2",fontSize:11,fontWeight:700,cursor:"pointer",color:"#dc2626"}}>Remove</button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })
+          )}
+
+          {properties.length>0&&(
+            <button onClick={()=>setShowAdd(!showAdd)} style={{padding:"11px",borderRadius:10,border:"1.5px dashed #d1d5db",background:"transparent",fontSize:12,fontWeight:600,cursor:"pointer",color:"#6b7280",width:"100%"}}>
+              {showAdd?"✕ Cancel":"+ Add Property"}
+            </button>
+          )}
 
           {showAdd&&(
-            <div style={{padding:"18px 22px",background:"#fafafa",borderBottom:"1px solid #f3f4f6"}}>
-              <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr 1fr",gap:10,marginBottom:10}}>
-                <input value={newProp.address} onChange={e=>np("address")(e.target.value)} placeholder="Address *" style={{padding:"8px 10px",borderRadius:8,border:"1.5px solid #e5e7eb",fontSize:12,outline:"none",fontFamily:"'DM Sans',sans-serif"}}/>
-                <select value={newProp.type} onChange={e=>np("type")(e.target.value)} style={{padding:"8px 10px",borderRadius:8,border:"1.5px solid #e5e7eb",fontSize:12,outline:"none"}}>
-                  {["Single Family","Multi-Family","Commercial","STR","Vacant Land"].map(t=><option key={t}>{t}</option>)}
+            <div style={{background:"white",borderRadius:14,border:"1.5px solid #e5e7eb",padding:"18px",boxShadow:"0 2px 8px rgba(0,0,0,0.06)"}}>
+              <div style={{fontSize:12,fontWeight:700,color:"#374151",marginBottom:14}}>Add Property</div>
+              <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                <div style={{display:"flex",flexDirection:"column",gap:4}}>
+                  <label style={{fontSize:10,fontWeight:600,color:"#6b7280",textTransform:"uppercase"}}>Address</label>
+                  <input value={newProp.address} onChange={e=>np("address")(e.target.value)} placeholder="123 Main St, City, ST" style={{border:"1.5px solid #e5e7eb",borderRadius:8,padding:"8px 12px",fontSize:13,outline:"none"}}/>
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                  {[["Property Value","value","$"],["Loan Balance","loan_balance","$"],["Monthly Rent","monthly_rent","$"],["Monthly Expenses","monthly_expenses","$"],["Monthly Mortgage","monthly_mortgage","$"],["Mortgage Rate","mortgage_rate","%"],["Mortgage Term","mortgage_term","yr"],["Est. P(Neg CF)","pNegCF","%"]].map(([l,k,unit])=>(
+                    <div key={k} style={{display:"flex",flexDirection:"column",gap:3}}>
+                      <label style={{fontSize:10,fontWeight:600,color:"#6b7280",textTransform:"uppercase"}}>{l}</label>
+                      <div style={{display:"flex",alignItems:"center",border:"1.5px solid #e5e7eb",borderRadius:8,overflow:"hidden"}}>
+                        {unit==="$"&&<span style={{padding:"0 8px",color:"#9ca3af",fontSize:12,background:"#f9fafb",borderRight:"1px solid #e5e7eb"}}>$</span>}
+                        <input type="number" value={newProp[k]||""} onChange={e=>np(k)(e.target.value)} style={{flex:1,border:"none",outline:"none",padding:"8px 10px",fontSize:13,fontFamily:"'DM Mono',monospace",color:"#111827",background:"transparent"}}/>
+                        {unit!=="$"&&<span style={{padding:"0 8px",color:"#9ca3af",fontSize:12,background:"#f9fafb",borderLeft:"1px solid #e5e7eb"}}>{unit}</span>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <select value={newProp.type} onChange={e=>np("type")(e.target.value)} style={{border:"1.5px solid #e5e7eb",borderRadius:8,padding:"8px 12px",fontSize:13,background:"white",outline:"none"}}>
+                  {["Single Family","Multi-Family","Commercial","Condo/Townhouse","Land"].map(t=><option key={t}>{t}</option>)}
                 </select>
-                <input type="number" value={newProp.value} onChange={e=>np("value")(e.target.value)} placeholder="Market Value $" style={{padding:"8px 10px",borderRadius:8,border:"1.5px solid #e5e7eb",fontSize:12,outline:"none",fontFamily:"'DM Mono',monospace"}}/>
-                <input type="number" value={newProp.loan_balance} onChange={e=>np("loan_balance")(e.target.value)} placeholder="Loan Balance $" style={{padding:"8px 10px",borderRadius:8,border:"1.5px solid #e5e7eb",fontSize:12,outline:"none",fontFamily:"'DM Mono',monospace"}}/>
-                <input type="number" value={newProp.monthly_rent} onChange={e=>np("monthly_rent")(e.target.value)} placeholder="Monthly Rent $" style={{padding:"8px 10px",borderRadius:8,border:"1.5px solid #e5e7eb",fontSize:12,outline:"none",fontFamily:"'DM Mono',monospace"}}/>
+                <button onClick={addProp} style={{padding:"10px",borderRadius:10,border:"none",background:"#059669",color:"white",fontSize:13,fontWeight:700,cursor:"pointer"}}>Add Property</button>
               </div>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr 1fr",gap:10,marginBottom:12}}>
-                <input type="number" value={newProp.monthly_expenses} onChange={e=>np("monthly_expenses")(e.target.value)} placeholder="Expenses/mo $" style={{padding:"8px 10px",borderRadius:8,border:"1.5px solid #e5e7eb",fontSize:12,outline:"none",fontFamily:"'DM Mono',monospace"}}/>
-                <input type="number" value={newProp.monthly_mortgage} onChange={e=>np("monthly_mortgage")(e.target.value)} placeholder="Mortgage/mo $" style={{padding:"8px 10px",borderRadius:8,border:"1.5px solid #e5e7eb",fontSize:12,outline:"none",fontFamily:"'DM Mono',monospace"}}/>
-                <input type="number" value={newProp.mortgage_rate} onChange={e=>np("mortgage_rate")(e.target.value)} placeholder="Rate %" style={{padding:"8px 10px",borderRadius:8,border:"1.5px solid #e5e7eb",fontSize:12,outline:"none",fontFamily:"'DM Mono',monospace"}}/>
-                <input type="number" value={newProp.mortgage_term} onChange={e=>np("mortgage_term")(e.target.value)} placeholder="Term yr" style={{padding:"8px 10px",borderRadius:8,border:"1.5px solid #e5e7eb",fontSize:12,outline:"none",fontFamily:"'DM Mono',monospace"}}/>
-                <input value={newProp.notes} onChange={e=>np("notes")(e.target.value)} placeholder="Notes" style={{padding:"8px 10px",borderRadius:8,border:"1.5px solid #e5e7eb",fontSize:12,outline:"none",fontFamily:"'DM Sans',sans-serif"}}/>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── RISK INTELLIGENCE TAB ── */}
+      {portfolioTab==="risk"&&(
+        <div style={{display:"flex",flexDirection:"column",gap:14}}>
+
+          {/* Portfolio posture card */}
+          {riskData&&(
+            <div style={{background:riskData.postureBg,borderRadius:14,border:`2px solid ${riskData.postureColor}30`,padding:"18px 20px"}}>
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
+                <div>
+                  <div style={{fontSize:10,fontWeight:700,color:riskData.postureColor,textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:4}}>Portfolio Posture</div>
+                  <div style={{fontSize:26,fontWeight:900,color:riskData.postureColor,lineHeight:1}}>{riskData.postureIcon} {riskData.posture}</div>
+                </div>
+                <div style={{textAlign:"right"}}>
+                  <div style={{fontSize:10,color:"#9ca3af",marginBottom:4}}>Properties at risk</div>
+                  <div style={{fontSize:22,fontWeight:900,fontFamily:"'DM Mono',monospace",color:riskData.negCFProps>0?"#dc2626":"#059669"}}>{riskData.negCFProps}</div>
+                </div>
               </div>
-              <div style={{display:"flex",gap:8}}>
-                <Btn variant="ghost" small onClick={()=>setShowAdd(false)}>Cancel</Btn>
-                <Btn variant="primary" small disabled={!newProp.address} onClick={addProp}>Add Property</Btn>
+              <p style={{fontSize:12,color:"#374151",margin:0,lineHeight:1.5}}>{riskData.postureDesc}</p>
+            </div>
+          )}
+
+          {/* Risk probability */}
+          {riskData&&(
+            <div style={{background:"white",borderRadius:12,border:"1.5px solid #e5e7eb",overflow:"hidden",boxShadow:"0 1px 4px rgba(0,0,0,0.04)"}}>
+              <div style={{padding:"11px 16px",borderBottom:"1px solid #f3f4f6",background:"#f5f3ff"}}>
+                <div style={{fontSize:11,fontWeight:700,color:"#6d28d9",textTransform:"uppercase",letterSpacing:"0.06em"}}>🎲 Portfolio Probability</div>
+                <div style={{fontSize:9,color:"#9ca3af",marginTop:2}}>Aggregate risk across all properties</div>
+              </div>
+              <div style={{padding:"14px 16px",display:"flex",flexDirection:"column",gap:12}}>
+                <ProbabilityBar label="At Least 1 Property Goes Negative" pct={Math.round(riskData.pAtLeastOneNeg*100)}
+                  humanLabel={`Derived from individual property probabilities using: 1 − ∏(1 − P_i)`}/>
+                <ProbabilityBar label="Portfolio Avg P(Neg CF)" pct={Math.round(riskData.portfolioPNeg)}
+                  humanLabel="Weighted average probability across all properties"/>
+                {riskData.concentrationRisk>0.40&&(
+                  <div style={{padding:"10px 12px",background:"#fffbeb",borderRadius:8,border:"1px solid #fde68a",fontSize:11,color:"#92400e",fontWeight:600}}>
+                    ⚠️ Concentration risk: {Math.round(riskData.concentrationRisk*100)}% of portfolio CF from one property. Diversification recommended.
+                  </div>
+                )}
+                {riskData.liquidityBuffer>0&&(
+                  <div style={{padding:"10px 12px",background:"#fef2f2",borderRadius:8,border:"1px solid #fecaca",fontSize:11,color:"#dc2626",fontWeight:600}}>
+                    💧 Liquidity buffer required: {fmtD(riskData.liquidityBuffer)}/mo to cover negative-CF properties
+                  </div>
+                )}
               </div>
             </div>
           )}
 
-          {propCalcs.length===0?(
-            <div style={{padding:"40px",textAlign:"center",color:"#9ca3af"}}>
-              <div style={{fontSize:36,marginBottom:10}}>🏠</div>
-              <p style={{fontSize:14}}>No properties yet. Add one to start tracking.</p>
-            </div>
-          ):(
-            propCalcs.map((prop,idx)=>(
-              <div key={prop.id} style={{borderBottom:idx<propCalcs.length-1?"1px solid #f3f4f6":"none"}}>
-                {/* Property row */}
-                <div style={{padding:"16px 22px",display:"flex",alignItems:"center",gap:14,cursor:"pointer"}} onClick={()=>setExpandedProp(expandedProp===prop.id?null:prop.id)}>
-                  {/* Grade badge */}
-                  <div style={{width:42,height:42,borderRadius:10,background:prop.gradeBg,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,border:`1.5px solid ${prop.gradeColor}30`}}>
-                    <span style={{fontSize:20}}>{prop.gradeIcon}</span>
-                  </div>
-                  {/* Address + grade */}
-                  <div style={{flex:1,minWidth:0}}>
-                    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:2,flexWrap:"wrap"}}>
-                      <span style={{fontSize:14,fontWeight:700,color:"#111827"}}>{prop.address}</span>
-                      <span style={{fontSize:10,background:prop.gradeBg,color:prop.gradeColor,padding:"1px 8px",borderRadius:100,fontWeight:700,border:`1px solid ${prop.gradeColor}30`}}>{prop.grade}</span>
-                      <span style={{fontSize:10,background:"#f3f4f6",color:"#6b7280",padding:"1px 8px",borderRadius:100}}>{prop.type}</span>
-                      {prop.flags.map(f=><span key={f} style={{fontSize:10,background:"#fef2f2",color:"#dc2626",padding:"1px 8px",borderRadius:100,border:"1px solid #fecaca"}}>⚠️ {f}</span>)}
-                    </div>
-                    <div style={{fontSize:11,color:"#9ca3af"}}>Score: {prop.score}/100 · {prop.gradePurpose}</div>
-                  </div>
-                  {/* Key stats */}
-                  <div style={{display:"flex",gap:16,flexShrink:0,flexWrap:"wrap"}}>
-                    {[["Value",fmtM(parseFloat(prop.value)||0),"#111827"],["Equity",fmtM(prop.equity),"#7c3aed"],["CF/mo",fmtD(prop.mcf),prop.mcf>=0?"#059669":"#dc2626"],["DSCR",prop.dscr>0?prop.dscr.toFixed(2)+"x":"—",prop.dscr>=1.35?"#059669":prop.dscr>=1.2?"#d97706":"#dc2626"]].map(([l,v,c])=>(
-                      <div key={l} style={{textAlign:"center"}}>
-                        <div style={{fontSize:14,fontWeight:800,fontFamily:"'DM Mono',monospace",color:c}}>{v}</div>
-                        <div style={{fontSize:9,color:"#9ca3af",textTransform:"uppercase"}}>{l}</div>
-                      </div>
-                    ))}
-                  </div>
-                  <span style={{fontSize:12,color:"#9ca3af",flexShrink:0}}>{expandedProp===prop.id?"▲":"▼"}</span>
-                </div>
-
-                {/* Expanded detail */}
-                {expandedProp===prop.id&&(
-                  <div style={{padding:"0 22px 18px",background:"#fafafa",borderTop:"1px solid #f3f4f6"}}>
-                    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:10,marginBottom:14,paddingTop:14}}>
-                      {[
-                        ["LTV",fmtP(prop.ltv),prop.ltv<=0.75?"#059669":prop.ltv<=0.85?"#d97706":"#dc2626"],
-                        ["Cash-on-Cash",fmtP(prop.coc),prop.coc>=0.08?"#059669":"#d97706"],
-                        ["Annual CF",fmtD(prop.acf),prop.acf>=0?"#059669":"#dc2626"],
-                        ["NOI",fmtD(prop.noi),"#374151"],
-                        ["Expense Ratio",fmtP(prop.expRatio),prop.expRatio<=0.5?"#059669":"#dc2626"],
-                        ["Break-Even Occ.",fmtP(prop.breakEven),"#374151"],
-                      ].map(([l,v,c])=>(
-                        <div key={l} style={{background:"white",borderRadius:10,padding:"10px 12px",border:"1.5px solid #e5e7eb",textAlign:"center"}}>
-                          <div style={{fontSize:9,color:"#9ca3af",fontWeight:700,textTransform:"uppercase",marginBottom:4}}>{l}</div>
-                          <div style={{fontSize:15,fontWeight:800,fontFamily:"'DM Mono',monospace",color:c}}>{v}</div>
-                        </div>
-                      ))}
-                    </div>
-                    {/* Score bar */}
-                    <div style={{marginBottom:14}}>
-                      <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
-                        <span style={{fontSize:11,fontWeight:600,color:"#374151"}}>Property Score</span>
-                        <span style={{fontSize:11,fontWeight:800,color:prop.gradeColor}}>{prop.score}/100 — {prop.grade}</span>
-                      </div>
-                      <div style={{height:8,background:"#f3f4f6",borderRadius:4,overflow:"hidden"}}>
-                        <div style={{height:"100%",width:`${prop.score}%`,background:prop.gradeColor,borderRadius:4,transition:"width 0.5s"}}/>
-                      </div>
-                    </div>
-                    <div style={{display:"flex",gap:8}}>
-                      <button onClick={()=>setRefiProp(prop)} style={{padding:"8px 16px",borderRadius:8,border:"1.5px solid #bfdbfe",background:"#eff6ff",color:"#2563eb",fontSize:12,fontWeight:700,cursor:"pointer"}}>🏦 Refi Simulator</button>
-                      <button onClick={()=>removeProp(prop.id)} style={{padding:"8px 14px",borderRadius:8,border:"1.5px solid #fee2e2",background:"#fff5f5",color:"#dc2626",fontSize:12,cursor:"pointer"}}>Remove</button>
-                    </div>
-                  </div>
-                )}
+          {/* Portfolio stress test */}
+          {stressData&&(
+            <div style={{background:"white",borderRadius:12,border:"1.5px solid #e5e7eb",overflow:"hidden",boxShadow:"0 1px 4px rgba(0,0,0,0.04)"}}>
+              <div style={{padding:"11px 16px",borderBottom:"1px solid #f3f4f6",background:"#fff7ed"}}>
+                <div style={{fontSize:11,fontWeight:700,color:"#ea580c",textTransform:"uppercase",letterSpacing:"0.06em"}}>🔥 Portfolio Stress Test</div>
+                <div style={{fontSize:9,color:"#9ca3af",marginTop:2}}>Rent −10% · 1 vacancy/property · Rates +100bps</div>
               </div>
-            ))
+              <div style={{padding:"14px 16px"}}>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:14}}>
+                  {[
+                    ["Stressed CF",     fmtD(stressData.totalStressCF)+"/mo",    stressData.totalStressCF>=0?"#059669":"#dc2626"],
+                    ["Props Go Neg",    stressData.propsGoNeg+"/"+properties.length, stressData.propsGoNeg===0?"#059669":stressData.propsGoNeg<properties.length*0.5?"#d97706":"#dc2626"],
+                    ["Capital Need",    fmtD(stressData.capitalShortfall)+"/mo",  stressData.capitalShortfall===0?"#059669":"#dc2626"],
+                  ].map(([l,v,col])=>(
+                    <div key={l} style={{background:"#f9fafb",borderRadius:8,padding:"10px 12px",textAlign:"center"}}>
+                      <div style={{fontSize:9,color:"#9ca3af",textTransform:"uppercase",fontWeight:700,marginBottom:3}}>{l}</div>
+                      <div style={{fontSize:14,fontWeight:800,fontFamily:"'DM Mono',monospace",color:col}}>{v}</div>
+                    </div>
+                  ))}
+                </div>
+                <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                  {stressData.results.map((r,idx)=>(
+                    <div key={idx} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"7px 10px",background:r.goesNeg?"#fef2f2":"#f9fafb",borderRadius:8,gap:8}}>
+                      <span style={{fontSize:11,color:"#374151",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.address||`Property ${idx+1}`}</span>
+                      <div style={{display:"flex",gap:12,alignItems:"center",flexShrink:0}}>
+                        <span style={{fontSize:10,color:"#9ca3af"}}>base {fmtD(r.baseMCF)}</span>
+                        <span style={{fontSize:11,fontWeight:700,fontFamily:"'DM Mono',monospace",color:r.goesNeg?"#dc2626":"#059669"}}>{fmtD(r.stressMCF)}/mo</span>
+                        {r.goesNeg&&<span style={{fontSize:9,color:"#dc2626",background:"#fecaca",padding:"1px 5px",borderRadius:100,fontWeight:700}}>⚠ Neg</span>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Survival distribution */}
+          {propCalcs.length>0&&(
+            <div style={{background:"white",borderRadius:12,border:"1.5px solid #e5e7eb",padding:"16px",boxShadow:"0 1px 4px rgba(0,0,0,0.04)"}}>
+              <div style={{fontSize:10,fontWeight:700,color:"#9ca3af",textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:12}}>Survival Distribution</div>
+              {[["Strong","#059669"],["Stable","#2563eb"],["Fragile","#d97706"],["Critical","#ea580c"],["Fail","#dc2626"]].map(([label,color])=>{
+                const count=propCalcs.filter(p=>p.survivalLabel===label).length;
+                if(count===0)return null;
+                return(
+                  <div key={label} style={{display:"flex",alignItems:"center",gap:12,marginBottom:8}}>
+                    <div style={{width:60,fontSize:10,fontWeight:700,color,textAlign:"right"}}>{label}</div>
+                    <div style={{flex:1,height:14,background:"#f3f4f6",borderRadius:3,overflow:"hidden"}}>
+                      <div style={{height:"100%",width:`${count/propCalcs.length*100}%`,background:color,borderRadius:3,transition:"width 0.5s"}}/>
+                    </div>
+                    <div style={{fontSize:11,fontWeight:700,color:"#374151",width:20,textAlign:"center"}}>{count}</div>
+                  </div>
+                );
+              })}
+            </div>
           )}
         </div>
       )}
 
       {/* ── PROJECTIONS TAB ── */}
       {portfolioTab==="projections"&&(
-        <div style={{background:"white",borderRadius:14,border:"1.5px solid #e5e7eb",overflow:"hidden"}}>
-          <div style={{padding:"16px 22px",borderBottom:"1px solid #f3f4f6",background:"linear-gradient(135deg,#f0fdf4,#ecfdf5)"}}>
-            <h3 style={{fontSize:15,fontWeight:700,color:"#111827",marginBottom:2}}>🔮 Future Scaling Engine</h3>
-            <p style={{fontSize:12,color:"#6b7280"}}>Project your portfolio with growth assumptions + future acquisitions</p>
-          </div>
-          <div style={{padding:"22px"}}>
-            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:12,marginBottom:24}}>
-              {[["Proj. Years",projYears,setProjYears,"yr"],["Appreciation %",projGrowth,setProjGrowth,"%"],["Rent Growth %",projRentGrowth,setProjRentGrowth,"%"],["Expense Growth",projExpGrowth,setProjExpGrowth,"%"],["Acquisitions/yr",projAcqCount,setProjAcqCount,"props"],["Avg Value",projAcqValue,setProjAcqValue,"$"],["Avg CF/prop",projAcqCF,setProjAcqCF,"$"]].map(([label,val,setter,unit])=>(
-                <div key={label}>
-                  <label style={{fontSize:10,fontWeight:700,color:"#6b7280",textTransform:"uppercase",letterSpacing:"0.05em",display:"block",marginBottom:4}}>{label}</label>
-                  <input type="number" value={val} onChange={e=>setter(+e.target.value)} style={{width:"100%",padding:"8px 10px",borderRadius:8,border:"1.5px solid #e5e7eb",fontSize:13,fontFamily:"'DM Mono',monospace",outline:"none",color:"#111827"}}/>
-                  <span style={{fontSize:9,color:"#9ca3af"}}>{unit}</span>
+        <div style={{display:"flex",flexDirection:"column",gap:14}}>
+          <div style={{background:"white",borderRadius:12,border:"1.5px solid #e5e7eb",padding:"16px"}}>
+            <div style={{fontSize:11,fontWeight:700,color:"#374151",marginBottom:12}}>Growth Assumptions</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
+              {[["Appreciation %",projGrowth,setProjGrowth],["Rent Growth %",projRentGrowth,setProjRentGrowth],["Expense Inflation %",projExpGrowth,setProjExpGrowth],["Projection Years",projYears,setProjYears]].map(([l,v,setter])=>(
+                <div key={l} style={{display:"flex",flexDirection:"column",gap:4}}>
+                  <label style={{fontSize:10,fontWeight:600,color:"#6b7280",textTransform:"uppercase"}}>{l}</label>
+                  <div style={{display:"flex",alignItems:"center",border:"1.5px solid #e5e7eb",borderRadius:8,overflow:"hidden"}}>
+                    <input type="number" value={v} onChange={e=>setter(+e.target.value)} step="0.5" style={{flex:1,border:"none",outline:"none",padding:"8px 12px",fontSize:13,fontFamily:"'DM Mono',monospace",color:"#111827"}}/>
+                  </div>
                 </div>
               ))}
             </div>
-            {/* Bar chart */}
-            <div style={{marginBottom:20}}>
-              <div style={{display:"flex",justifyContent:"space-between",marginBottom:10}}>
-                <span style={{fontSize:12,fontWeight:700,color:"#374151"}}>Portfolio Value & Equity</span>
-                <div style={{display:"flex",gap:12}}>
-                  {[["#10b981","Value"],["#7c3aed","Equity"]].map(([c,l])=><div key={l} style={{display:"flex",alignItems:"center",gap:4}}><div style={{width:9,height:9,borderRadius:2,background:c}}/><span style={{fontSize:10,color:"#6b7280"}}>{l}</span></div>)}
+            <div style={{fontSize:11,fontWeight:700,color:"#374151",marginBottom:8}}>Future Acquisitions</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+              {[["Properties/yr",projAcqCount,setProjAcqCount],["Avg Value",projAcqValue,setProjAcqValue],["CF/unit",projAcqCF,setProjAcqCF]].map(([l,v,setter])=>(
+                <div key={l} style={{display:"flex",flexDirection:"column",gap:4}}>
+                  <label style={{fontSize:10,fontWeight:600,color:"#6b7280",textTransform:"uppercase"}}>{l}</label>
+                  <input type="number" value={v} onChange={e=>setter(+e.target.value)} style={{border:"1.5px solid #e5e7eb",borderRadius:8,padding:"8px 12px",fontSize:13,fontFamily:"'DM Mono',monospace",color:"#111827",outline:"none"}}/>
                 </div>
-              </div>
-              <div style={{display:"flex",alignItems:"flex-end",gap:4,height:140,padding:"0 2px"}}>
-                {projections.map((p,i)=>(
-                  <div key={i} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:3}}>
-                    <div style={{width:"100%",display:"flex",gap:2,alignItems:"flex-end",height:120}}>
-                      <div style={{flex:1,background:"#10b981",borderRadius:"3px 3px 0 0",opacity:0.85,height:`${(p.val/maxProjVal)*100}%`,minHeight:3,transition:"height 0.4s"}}/>
-                      <div style={{flex:1,background:"#7c3aed",borderRadius:"3px 3px 0 0",opacity:0.85,height:`${(p.equity/maxProjVal)*100}%`,minHeight:3,transition:"height 0.4s"}}/>
-                    </div>
-                    <span style={{fontSize:8,color:"#9ca3af"}}>Y{p.yr}</span>
-                  </div>
-                ))}
-              </div>
+              ))}
             </div>
-            {/* Projection table */}
+          </div>
+
+          <div style={{background:"white",borderRadius:12,border:"1.5px solid #e5e7eb",overflow:"hidden"}}>
+            <div style={{padding:"10px 16px",borderBottom:"1px solid #f3f4f6",fontSize:10,fontWeight:700,color:"#9ca3af",textTransform:"uppercase",letterSpacing:"0.07em"}}>Portfolio Projections</div>
             <div style={{overflowX:"auto"}}>
-              <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
-                <thead><tr style={{background:"#f9fafb"}}>{["Year","Portfolio Value","Total Equity","Mo. CF","Properties","Capital Needed"].map(h=><th key={h} style={{padding:"8px 10px",textAlign:"right",fontWeight:700,color:"#6b7280",fontSize:9,textTransform:"uppercase",borderBottom:"1.5px solid #e5e7eb"}}>{h}</th>)}</tr></thead>
-                <tbody>{projections.map((p,i)=>(
-                  <tr key={i} style={{background:i%2===0?"white":"#fafafa"}} onMouseEnter={e=>e.currentTarget.style.background="#f0fdf4"} onMouseLeave={e=>e.currentTarget.style.background=i%2===0?"white":"#fafafa"}>
-                    <td style={{padding:"9px 10px",fontWeight:i===0?500:700,color:i===0?"#9ca3af":"#111827",borderBottom:"1px solid #f3f4f6",textAlign:"right"}}>{i===0?"Now":`Yr ${p.yr}`}</td>
-                    <td style={{padding:"9px 10px",textAlign:"right",fontFamily:"'DM Mono',monospace",fontWeight:700,color:"#059669",borderBottom:"1px solid #f3f4f6"}}>{fmtM(p.val)}</td>
-                    <td style={{padding:"9px 10px",textAlign:"right",fontFamily:"'DM Mono',monospace",fontWeight:700,color:"#7c3aed",borderBottom:"1px solid #f3f4f6"}}>{fmtM(p.equity)}</td>
-                    <td style={{padding:"9px 10px",textAlign:"right",fontFamily:"'DM Mono',monospace",fontWeight:700,color:p.mcf>=0?"#059669":"#dc2626",borderBottom:"1px solid #f3f4f6"}}>{fmtD(p.mcf)}/mo</td>
-                    <td style={{padding:"9px 10px",textAlign:"right",fontFamily:"'DM Mono',monospace",color:"#374151",borderBottom:"1px solid #f3f4f6"}}>{p.props}</td>
-                    <td style={{padding:"9px 10px",textAlign:"right",fontFamily:"'DM Mono',monospace",color:"#6b7280",borderBottom:"1px solid #f3f4f6"}}>{i===0?"—":fmtM(projAcqCount*projAcqValue*i*0.2)}</td>
+              <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+                <thead><tr style={{background:"#f9fafb"}}>{["Yr","Value","Equity","CF/mo","Props"].map(h=><th key={h} style={{padding:"7px 12px",textAlign:"right",fontWeight:700,color:"#9ca3af",fontSize:9,textTransform:"uppercase"}}>{h}</th>)}</tr></thead>
+                <tbody>{projections.map((p,idx)=>(
+                  <tr key={idx} style={{borderTop:"1px solid #f9fafb"}}>
+                    <td style={{padding:"7px 12px",fontWeight:700,color:"#374151",textAlign:"right"}}>{p.yr}</td>
+                    <td style={{padding:"7px 12px",textAlign:"right",fontFamily:"'DM Mono',monospace",color:"#059669",fontWeight:600}}>{fmtM(p.val)}</td>
+                    <td style={{padding:"7px 12px",textAlign:"right",fontFamily:"'DM Mono',monospace",color:"#7c3aed",fontWeight:600}}>{fmtM(p.equity)}</td>
+                    <td style={{padding:"7px 12px",textAlign:"right",fontFamily:"'DM Mono',monospace",color:p.mcf>=0?"#059669":"#dc2626",fontWeight:700}}>{fmtD(p.mcf)}</td>
+                    <td style={{padding:"7px 12px",textAlign:"right",color:"#374151"}}>{p.props}</td>
                   </tr>
                 ))}</tbody>
               </table>
@@ -3826,69 +4026,10 @@ function PortfolioAnalyzer({profile,onSave}) {
         </div>
       )}
 
-      {/* ── RISK TAB ── */}
-      {portfolioTab==="risks"&&(
-        <div style={{background:"white",borderRadius:14,border:"1.5px solid #e5e7eb",overflow:"hidden"}}>
-          <div style={{padding:"16px 22px",borderBottom:"1px solid #f3f4f6",background:"#fef2f2"}}>
-            <h3 style={{fontSize:15,fontWeight:700,color:"#111827",marginBottom:2}}>⚠️ Portfolio Risk Report</h3>
-            <p style={{fontSize:12,color:"#6b7280"}}>Properties flagged for attention</p>
-          </div>
-          <div style={{padding:"22px"}}>
-            {propCalcs.filter(p=>p.flags.length>0).length===0?(
-              <div style={{textAlign:"center",padding:"40px",color:"#9ca3af"}}>
-                <div style={{fontSize:36,marginBottom:10}}>✅</div>
-                <p style={{fontSize:14,fontWeight:600,color:"#059669"}}>No risk flags! Portfolio looks healthy.</p>
-              </div>
-            ):(
-              propCalcs.filter(p=>p.flags.length>0).map(prop=>(
-                <div key={prop.id} style={{marginBottom:16,padding:"16px 18px",background:"#fef2f2",borderRadius:12,border:"1.5px solid #fecaca"}}>
-                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8,flexWrap:"wrap",gap:8}}>
-                    <div style={{display:"flex",alignItems:"center",gap:8}}>
-                      <span style={{fontSize:16}}>{prop.gradeIcon}</span>
-                      <span style={{fontSize:14,fontWeight:700,color:"#111827"}}>{prop.address}</span>
-                      <span style={{fontSize:10,background:prop.gradeBg,color:prop.gradeColor,padding:"1px 8px",borderRadius:100,fontWeight:700}}>{prop.grade}</span>
-                    </div>
-                    <button onClick={()=>setRefiProp(prop)} style={{padding:"6px 14px",borderRadius:8,border:"1.5px solid #bfdbfe",background:"#eff6ff",color:"#2563eb",fontSize:11,fontWeight:700,cursor:"pointer"}}>🏦 Simulate Refi</button>
-                  </div>
-                  <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:10}}>
-                    {prop.flags.map(f=><span key={f} style={{fontSize:11,background:"white",color:"#dc2626",padding:"3px 10px",borderRadius:100,border:"1px solid #fecaca",fontWeight:600}}>⚠️ {f}</span>)}
-                  </div>
-                  <div style={{display:"flex",gap:14,flexWrap:"wrap"}}>
-                    {[["CF/mo",fmtD(prop.mcf),prop.mcf>=0?"#059669":"#dc2626"],["DSCR",prop.dscr>0?prop.dscr.toFixed(2)+"x":"—",prop.dscr>=1.2?"#d97706":"#dc2626"],["LTV",fmtP(prop.ltv),prop.ltv<=0.8?"#d97706":"#dc2626"],["Score",`${prop.score}/100`,prop.gradeColor]].map(([l,v,c])=>(
-                      <div key={l}><div style={{fontSize:14,fontWeight:800,fontFamily:"'DM Mono',monospace",color:c}}>{v}</div><div style={{fontSize:9,color:"#9ca3af",textTransform:"uppercase"}}>{l}</div></div>
-                    ))}
-                  </div>
-                </div>
-              ))
-            )}
-            {/* Portfolio-level risk summary */}
-            <div style={{marginTop:16,padding:"16px 18px",background:"#f9fafb",borderRadius:12,border:"1.5px solid #e5e7eb"}}>
-              <div style={{fontSize:11,fontWeight:700,color:"#374151",marginBottom:12,textTransform:"uppercase",letterSpacing:"0.06em"}}>Portfolio Health Check</div>
-              {[
-                ["Weighted Avg DSCR",totals.wdscr.toFixed(2)+"x",totals.wdscr>=1.35?"✅":totals.wdscr>=1.2?"⚠️":"🔴"],
-                ["Weighted Avg LTV",fmtP(totals.wltv),totals.wltv<=0.75?"✅":totals.wltv<=0.85?"⚠️":"🔴"],
-                ["Properties with Negative CF",propCalcs.filter(p=>p.mcf<0).length+" of "+totals.count,propCalcs.filter(p=>p.mcf<0).length===0?"✅":"🔴"],
-                ["Properties with LTV > 80%",propCalcs.filter(p=>p.ltv>0.8).length+" of "+totals.count,propCalcs.filter(p=>p.ltv>0.8).length===0?"✅":"⚠️"],
-                ["High Expense Ratio (>50%)",propCalcs.filter(p=>p.expRatio>0.5).length+" of "+totals.count,propCalcs.filter(p=>p.expRatio>0.5).length===0?"✅":"⚠️"],
-              ].map(([label,val,icon])=>(
-                <div key={label} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",borderBottom:"1px solid #f3f4f6"}}>
-                  <span style={{fontSize:12,color:"#6b7280"}}>{label}</span>
-                  <div style={{display:"flex",alignItems:"center",gap:6}}><span style={{fontSize:12,fontWeight:700,fontFamily:"'DM Mono',monospace",color:"#374151"}}>{val}</span><span style={{fontSize:14}}>{icon}</span></div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
-      <div style={{display:"flex",justifyContent:"flex-end"}}>
-        <Btn variant="primary" onClick={handleSave}>💾 Save Portfolio</Btn>
-      </div>
+      <Btn variant="primary" onClick={handleSave}>💾 Save Portfolio</Btn>
     </div>
   );
 }
-
-
 // ─── Profile Page ──────────────────────────────────────────────────────────────
 function ProfilePage({user,profile,onUpdate,onSignOut,onBack}) {
   const [tab,setTab]=useState("profile");
