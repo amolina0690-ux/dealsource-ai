@@ -85,8 +85,8 @@ function GlobalStyles() {
       .profile-tabs button{white-space:nowrap; flex-shrink:0;}
       .decision-hero{padding:16px 14px !important;}
       .mentoring-grid{grid-template-columns:1fr !important; gap:32px !important;}
-      .field-grid-2{grid-template-columns:1fr 1fr !important;}
-      .results-grid{grid-template-columns:1fr 1fr !important;}
+      .field-grid-2{grid-template-columns:1fr !important;}
+      .results-grid{grid-template-columns:1fr !important;}
       .landing-padding{padding:60px 20px !important;}
       .header-profile-name{display:none !important;}
       .header-save-flash{display:none !important;}
@@ -338,7 +338,7 @@ function Divider({label}) {
 }
 function OutRow({label,value,highlight,positive,negative}) {
   const color=positive?"#059669":negative?"#dc2626":highlight?"#111827":"#374151";
-  return <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",borderBottom:"1px solid #f3f4f6",gap:8}}><span style={{fontSize:12,color:"#6b7280",flexShrink:0}}>{label}</span><span style={{fontSize:highlight?14:13,fontWeight:highlight?700:500,fontFamily:"'DM Mono',monospace",color,textAlign:"right"}}>{value}</span></div>;
+  return <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:"1px solid #f3f4f6",gap:12,minWidth:0}}><span style={{fontSize:12,color:"#6b7280",flex:"1 1 auto",minWidth:0}}>{label}</span><span style={{fontSize:highlight?14:13,fontWeight:highlight?700:500,fontFamily:"'DM Mono',monospace",color,textAlign:"right",flexShrink:0,whiteSpace:"nowrap"}}>{value}</span></div>;
 }
 function BigResult({label,value,positive,negative}) {
   const bg=positive?"#f0fdf4":negative?"#fef2f2":"#f9fafb";
@@ -826,7 +826,7 @@ function RentalCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro}) 
         <button key={String(adv)} onClick={()=>setAdvMode(adv)} style={{padding:"7px 18px",borderRadius:100,border:`1.5px solid ${advMode===adv?"#10b981":"#e5e7eb"}`,background:advMode===adv?"#f0fdf4":"white",color:advMode===adv?"#059669":"#6b7280",fontSize:12,fontWeight:700,cursor:"pointer"}}>{adv?"Advanced (Projections)":"Basic"}</button>
       ))}
     </div>
-    <div className="calc-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:24}}>
+    <div className="calc-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20}}>
       <div style={{display:"flex",flexDirection:"column",gap:10}}>
         <Divider label="Purchase"/>
         <Field label="Purchase Price" value={i.pp} onChange={s("pp")} prefix="$" step={5000}/>
@@ -862,7 +862,7 @@ function RentalCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro}) 
 
       <div style={{display:"flex",flexDirection:"column",gap:12}}>
         {/* Risk badge */}
-        <div style={{display:"flex",alignItems:"center",gap:10,padding:"11px 16px",borderRadius:10,background:c.risk==="green"?"#f0fdf4":c.risk==="yellow"?"#fffbeb":"#fef2f2",border:`1.5px solid ${c.risk==="green"?"#bbf7d0":c.risk==="yellow"?"#fde68a":"#fecaca"}`}}>
+        <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",padding:"11px 14px",borderRadius:10,background:c.risk==="green"?"#f0fdf4":c.risk==="yellow"?"#fffbeb":"#fef2f2",border:`1.5px solid ${c.risk==="green"?"#bbf7d0":c.risk==="yellow"?"#fde68a":"#fecaca"}`}}>
           <span style={{fontSize:18}}>{c.risk==="green"?"✅":c.risk==="yellow"?"⚠️":"🔴"}</span>
           <div><div style={{fontSize:13,fontWeight:700,color:c.risk==="green"?"#059669":c.risk==="yellow"?"#d97706":"#dc2626"}}>{c.risk==="green"?"Strong Cash Flow":c.risk==="yellow"?"Marginal Deal":"Negative Cash Flow"}</div>
           <div style={{fontSize:11,color:"#6b7280"}}>Monthly cash flow: {fmtD(c.mcf)}</div></div>
@@ -880,7 +880,7 @@ function RentalCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro}) 
           <BigResult label="Cash-on-Cash ROI" value={fmtP(c.coc)} positive={c.coc>=0.08} negative={c.coc<0}/>
         </div>
 
-        <div style={{background:"#f9fafb",borderRadius:12,padding:"2px 16px"}}>
+        <div style={{background:"#f9fafb",borderRadius:12,padding:"2px 14px",overflow:"hidden"}}>
           <OutRow label="Total Expenses/mo" value={fmtD(totalExp)}/>
           <OutRow label="Annual Cash Flow" value={fmtD(c.acf)} positive={c.acf>=0} negative={c.acf<0}/>
           <OutRow label="CF after CapEx" value={fmtD(c.mcfAfterCapex)} positive={c.mcfAfterCapex>=0} negative={c.mcfAfterCapex<0}/>
@@ -1449,7 +1449,7 @@ function SubToCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro}) {
 
       <div style={{display:"flex",flexDirection:"column",gap:12}}>
         {/* Risk badge */}
-        <div style={{display:"flex",alignItems:"center",gap:10,padding:"11px 16px",borderRadius:10,background:c.risk==="green"?"#f0fdf4":c.risk==="yellow"?"#fffbeb":"#fef2f2",border:`1.5px solid ${c.risk==="green"?"#bbf7d0":c.risk==="yellow"?"#fde68a":"#fecaca"}`}}>
+        <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",padding:"11px 14px",borderRadius:10,background:c.risk==="green"?"#f0fdf4":c.risk==="yellow"?"#fffbeb":"#fef2f2",border:`1.5px solid ${c.risk==="green"?"#bbf7d0":c.risk==="yellow"?"#fde68a":"#fecaca"}`}}>
           <span style={{fontSize:18}}>{c.risk==="green"?"✅":c.risk==="yellow"?"⚠️":"🔴"}</span>
           <div>
             <div style={{fontSize:13,fontWeight:700,color:c.risk==="green"?"#059669":c.risk==="yellow"?"#d97706":"#dc2626"}}>{c.risk==="green"?"Strong Sub-To Deal":c.risk==="yellow"?"Marginal Cash Flow":"Negative Cash Flow"}</div>
@@ -1932,7 +1932,7 @@ function ForumView({user, profile, savedDeals=[]}) {
       </div>
 
       {/* Filters */}
-      <div className="mode-pills" style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:22}}>
+      <div className="mode-pills" style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:22}}>
         <button onClick={()=>handleFilter("all")} style={{padding:"6px 14px",borderRadius:100,border:`1.5px solid ${filterMode==="all"?"#111827":"#e5e7eb"}`,background:filterMode==="all"?"#111827":"white",color:filterMode==="all"?"white":"#6b7280",fontSize:12,fontWeight:600,cursor:"pointer"}}>All</button>
         {MODES.map(m=>(
           <button key={m.key} onClick={()=>handleFilter(m.key)} style={{display:"flex",alignItems:"center",gap:5,padding:"6px 14px",borderRadius:100,border:`1.5px solid ${filterMode===m.key?m.border:"#e5e7eb"}`,background:filterMode===m.key?m.bg:"white",color:filterMode===m.key?m.color:"#6b7280",fontSize:12,fontWeight:600,cursor:"pointer"}}>{m.icon} {m.label}</button>
@@ -3789,7 +3789,7 @@ function AnalyzerApp({user,profile,onGoHome,onGoProfile,onSignOut}) {
           <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:22}}>
             {MODES.map(m=>(
               <button key={m.key} onClick={()=>{setMode(m.key);setLoadedDealId(null);}}
-                style={{display:"flex",alignItems:"center",gap:6,padding:"7px 12px",borderRadius:100,border:`2px solid ${mode===m.key?m.border:"#e5e7eb"}`,background:mode===m.key?m.bg:"white",cursor:"pointer",transition:"all 0.15s"}}>
+                style={{display:"flex",alignItems:"center",gap:6,padding:"8px 10px",borderRadius:12,border:`2px solid ${mode===m.key?m.border:"#e5e7eb"}`,background:mode===m.key?m.bg:"white",cursor:"pointer",transition:"all 0.15s"}}>
                 <span>{m.icon}</span>
                 <div style={{lineHeight:1.2}}>
                   <div style={{fontSize:12,fontWeight:700,color:mode===m.key?m.color:"#374151"}}>{m.label}</div>
@@ -3798,7 +3798,7 @@ function AnalyzerApp({user,profile,onGoHome,onGoProfile,onSignOut}) {
               </button>
             ))}
           </div>
-          <div style={{background:"white",borderRadius:18,border:"1.5px solid #e5e7eb",overflow:"hidden",boxShadow:"0 2px 16px rgba(0,0,0,0.04)"}}>
+          <div style={{background:"white",borderRadius:18,border:"1.5px solid #e5e7eb",overflow:"hidden",boxShadow:"0 2px 16px rgba(0,0,0,0.04)",maxWidth:"100vw"}}>
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"14px 22px",background:activeMode.bg,borderBottom:`1.5px solid ${activeMode.border}`}}>
               <div style={{display:"flex",alignItems:"center",gap:12}}>
                 <span style={{fontSize:20}}>{activeMode.icon}</span>
@@ -3806,7 +3806,7 @@ function AnalyzerApp({user,profile,onGoHome,onGoProfile,onSignOut}) {
               </div>
               {loadedDealId&&<div style={{display:"flex",alignItems:"center",gap:7,background:"white",border:`1.5px solid ${activeMode.border}`,borderRadius:100,padding:"4px 12px"}}><span style={{fontSize:11}}>📂</span><span style={{fontSize:11,color:activeMode.color,fontWeight:600}}>Loaded from saved</span></div>}
             </div>
-            <div className="calc-pad" style={{padding:"24px 22px"}}>
+            <div className="calc-pad" style={{padding:"24px 18px",overflowX:"hidden"}}>
               <CalcComponent key={`${mode}-${loadedDealId}`} saved={loadedDealId?deals.find(d=>d.id===loadedDealId)?.inputs:null} onCalcChange={handleCalcChange} profile={{...profile,is_pro:isPro}} isPro={isPro} onActivatePro={()=>setIsPro(true)}/>
             </div>
             <div style={{padding:"12px 16px",borderTop:"1px solid #f3f4f6",background:"#fafafa",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap"}}>
@@ -3912,5 +3912,3 @@ export default function Root() {
     {page==="profile"&&user&&<ProfilePage user={user} profile={profile} onUpdate={handleProfileUpdate} onSignOut={handleSignOut} onBack={()=>setPage("app")}/>}
   </>);
 }
-
-
