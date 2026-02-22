@@ -1524,7 +1524,7 @@ function RentalCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro,al
   const [optPP,setOptPP]=useState(null);
   const [optRent,setOptRent]=useState(null);
   const [optDown,setOptDown]=useState(null);
-  const [optTarget,setOptTarget]=useState("$300CF");
+  const [optTarget,setOptTarget]=useState("$300/mo CF");
   const [exitTab,setExitTab]=useState(0);
   const [riskTol,setRiskTol]=useState("standard");
 
@@ -1576,6 +1576,9 @@ function RentalCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro,al
     vacancy:+i.vacancy,capex:+i.capex,cc:+i.cc,rehab:+i.rehab,
   }),[c,totalExp,mort,i]);
 
+  const monte=useMemo(()=>runMonteCarlo(metrics,"rental"),[metrics]);
+  const liq=useMemo(()=>calcLiquidityRisk(metrics,"rental"),[metrics]);
+  const exits=useMemo(()=>calcExitScenarios(metrics,"rental"),[metrics]);
   const riskData=useMemo(()=>calcRentalScore(metrics,riskTol,monte),[metrics,riskTol,monte]);
 
   useEffect(()=>{setOptPP(null);setOptRent(null);setOptDown(null);},[i.pp,i.rent,i.down]);
@@ -5200,3 +5203,4 @@ export default function Root() {
     {page==="profile"&&user&&<ProfilePage user={user} profile={profile} onUpdate={handleProfileUpdate} onSignOut={handleSignOut} onBack={()=>setPage("app")}/>}
   </>);
 }
+
