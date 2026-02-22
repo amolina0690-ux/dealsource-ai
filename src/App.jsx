@@ -1609,44 +1609,38 @@ function RentalCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro,al
       {/* ══ HEADER STRIP ══ */}
       <div style={{background:"linear-gradient(135deg,#0f172a 0%,#1a2744 100%)",borderRadius:16,padding:"18px 20px",marginBottom:18,boxShadow:"0 6px 28px rgba(0,0,0,0.22)"}}>
 
-        {/* Row 1: Verdict + Pillars + Snapshot */}
-        <div style={{display:"flex",alignItems:"flex-start",gap:10,marginBottom:14,flexWrap:"wrap"}}>
-          {/* Verdict card */}
-          <div style={{background:vBg,borderRadius:10,padding:"10px 14px",flexShrink:0,minWidth:120}}>
-            <div style={{fontSize:9,color:"#6b7280",textTransform:"uppercase",fontWeight:700,letterSpacing:"0.07em",marginBottom:3}}>Decision</div>
-            <div style={{fontSize:17,fontWeight:900,color:vColor,lineHeight:1,marginBottom:4}}>{verdict.icon} {verdict.label}</div>
-            <div style={{fontSize:9,color:vColor,opacity:0.85,lineHeight:1.3,maxWidth:145}}>{verdict.reason}</div>
+        {/* Row 1: Verdict + Pillars */}
+        <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:14,flexWrap:"wrap"}}>
+          {/* Verdict — left-border accent only */}
+          <div style={{background:"rgba(255,255,255,0.07)",borderRadius:10,padding:"10px 16px",flexShrink:0,borderLeft:`3px solid ${vColor}`}}>
+            <div style={{fontSize:9,color:"rgba(255,255,255,0.35)",textTransform:"uppercase",fontWeight:700,letterSpacing:"0.07em",marginBottom:4}}>Decision</div>
+            <div style={{fontSize:18,fontWeight:900,color:vColor,lineHeight:1,marginBottom:3}}>{verdict.icon} {verdict.label}</div>
+            <div style={{fontSize:9,color:"rgba(255,255,255,0.45)",lineHeight:1.4,maxWidth:180}}>{verdict.reason}</div>
           </div>
 
-          {/* Three pillars */}
-          <div style={{display:"flex",gap:5,flex:1,minWidth:0}}>
+          {/* Pillars — compact single-line, no alert boxes */}
+          <div style={{display:"flex",flexDirection:"column",gap:5,flex:1,minWidth:0}}>
             {[{name:"Survival",d:survival},{name:"Income",d:income},{name:"Capital",d:capital}].map(({name,d})=>(
-              <div key={name} style={{flex:1,background:d.bg,borderRadius:8,padding:"8px 10px",border:`1.5px solid ${d.color}25`,minWidth:0}}>
-                <div style={{fontSize:8,color:"#9ca3af",textTransform:"uppercase",fontWeight:700,letterSpacing:"0.06em",marginBottom:3,whiteSpace:"nowrap"}}>{name}</div>
-                <div style={{fontSize:12,fontWeight:900,color:d.color,whiteSpace:"nowrap"}}>{d.icon} {d.label}</div>
+              <div key={name} style={{display:"flex",alignItems:"center",gap:8}}>
+                <span style={{fontSize:9,color:"rgba(255,255,255,0.3)",textTransform:"uppercase",fontWeight:700,letterSpacing:"0.06em",width:52,flexShrink:0}}>{name}</span>
+                <span style={{fontSize:10,fontWeight:700,color:d.label==="Fail"||d.label==="Structural Fail"||d.label==="Critical"?d.color:"rgba(255,255,255,0.65)"}}>{d.icon} {d.label}</span>
               </div>
             ))}
           </div>
-
-          {/* Snapshot pill */}
-          <div style={{background:snapBg,borderRadius:10,padding:"8px 14px",flexShrink:0,textAlign:"center"}}>
-            <div style={{fontSize:8,color:"#9ca3af",textTransform:"uppercase",fontWeight:700,marginBottom:1}}>Snapshot</div>
-            <div style={{fontSize:15,fontWeight:900,color:snapColor}}>{snapResult}</div>
-          </div>
         </div>
 
-        {/* Row 2: KPI strip */}
-        <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:1,background:"rgba(255,255,255,0.05)",borderRadius:10,overflow:"hidden",marginBottom:14}}>
+        {/* Row 2: KPI strip — informational, low contrast */}
+        <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:1,background:"rgba(255,255,255,0.04)",borderRadius:10,overflow:"hidden",marginBottom:14,border:"1px solid rgba(255,255,255,0.06)"}}>
           {[
-            ["Cash Flow", fmtD(c.mcf)+"/mo", c.mcf>=200?"#6ee7b7":c.mcf>=0?"#fde68a":"#fca5a5"],
-            ["CoC",       fmtP(c.coc),        c.coc>=0.08?"#6ee7b7":c.coc>=0.04?"#fde68a":"#fca5a5"],
-            ["DSCR",      c.dscr.toFixed(2)+"x", c.dscr>=1.25?"#6ee7b7":c.dscr>=1.15?"#fde68a":"#fca5a5"],
-            ["Cap Rate",  fmtP(c.capRate),    "#e2e8f0"],
-            ["Cash Req.", fmtM(c.ti),         "#e2e8f0"],
-          ].map(([l,v,col])=>(
+            ["Cash Flow", fmtD(c.mcf)+"/mo"],
+            ["CoC",       fmtP(c.coc)],
+            ["DSCR",      c.dscr.toFixed(2)+"x"],
+            ["Cap Rate",  fmtP(c.capRate)],
+            ["Cash Req.", fmtM(c.ti)],
+          ].map(([l,v])=>(
             <div key={l} style={{padding:"10px 8px",textAlign:"center"}}>
-              <div style={{fontSize:8,color:"rgba(255,255,255,0.3)",textTransform:"uppercase",fontWeight:700,letterSpacing:"0.06em",marginBottom:3}}>{l}</div>
-              <div style={{fontSize:12,fontWeight:800,fontFamily:"'DM Mono',monospace",color:col,lineHeight:1}}>{v}</div>
+              <div style={{fontSize:8,color:"rgba(255,255,255,0.25)",textTransform:"uppercase",fontWeight:700,letterSpacing:"0.06em",marginBottom:3}}>{l}</div>
+              <div style={{fontSize:12,fontWeight:600,fontFamily:"'DM Mono',monospace",color:"rgba(255,255,255,0.55)",lineHeight:1}}>{v}</div>
             </div>
           ))}
         </div>
@@ -1910,118 +1904,60 @@ function RentalCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro,al
                   </div>
                 </div>
 
-                {/* B: PILLAR CARDS — structural, categorical, no weights */}
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
-
-                  {/* ── SURVIVAL PILLAR ── */}
-                  {(()=>{
-                    const d=survival;
-                    const isHardFail=d.label==="Fail"||d.label==="Structural Fail";
-                    const diagnosis=
-                      d.label==="Strong"?"Debt well covered. Vacancy buffer is healthy. Stress-tested as resilient.":
-                      d.label==="Stable"?"Coverage adequate. Manageable vacancy tolerance with limited stress margin.":
-                      d.label==="Fragile"?"Debt coverage fragile. One vacancy event could breach break-even.":
-                      d.label==="Critical"?"Near-zero margin. Minor stress event eliminates coverage.":
-                      d.label==="Structural Fail"?"Break-even requires 95%+ occupancy — structurally unsustainable.":
-                      "Debt service exceeds income. This deal cannot support its own leverage.";
+                {/* B: PILLAR SUMMARY — compact status rows, not alert boxes */}
+                <div style={{background:"white",borderRadius:12,border:"1.5px solid #f0f0f0",overflow:"hidden",boxShadow:"0 1px 4px rgba(0,0,0,0.04)"}}>
+                  {[
+                    {name:"Survival", d:survival, metrics:[
+                      ["DSCR",      c.dscr.toFixed(2)+"x"],
+                      ["Break-even",(c.beo*100).toFixed(1)+"%"],
+                      ["P(neg CF)", (monte?.pNegCF??50)+"%"],
+                    ], diagnosis:
+                      survival.label==="Strong"?"Debt well covered, vacancy buffer healthy, stress-tested resilient.":
+                      survival.label==="Stable"?"Coverage adequate with limited stress margin.":
+                      survival.label==="Fragile"?"Debt coverage fragile — one vacancy event could breach break-even.":
+                      survival.label==="Critical"?"Near-zero margin. Minor stress eliminates coverage.":
+                      survival.label==="Structural Fail"?"Break-even requires 95%+ occupancy — structurally unsustainable.":
+                      "Debt service exceeds income. Deal cannot support its own leverage."},
+                    {name:"Income",   d:income,   metrics:[
+                      ["Monthly CF", fmtD(c.mcf)+"/mo"],
+                      ["CoC",        fmtP(c.coc)],
+                      ["5yr total",  fmtD(income.cum5yrCF)],
+                    ], diagnosis:
+                      income.label==="Strong"?"Cash flow above institutional benchmarks. Distributable income is real.":
+                      income.label==="Moderate"?"Property pays modestly. Below benchmark but positive cash-on-cash.":
+                      "Property does not produce distributable income at current inputs."},
+                    {name:"Capital",  d:capital,  metrics:[
+                      ["Required",   fmtD(c.ti)],
+                      ["5yr paydown",fmtD(capital.paydown5)],
+                      ["Efficiency", (capital.ratio*100).toFixed(0)+"%"],
+                    ], diagnosis:
+                      capital.label==="Strong"?"Capital working efficiently across amortization and cash flow.":
+                      capital.label==="Moderate"?"Capital growth driven mainly by amortization, limited cash contribution.":
+                      "Returns depend heavily on appreciation. Cash flow barely recovers capital."},
+                  ].map(({name,d,metrics,diagnosis},pi)=>{
+                    const isAlert=d.label==="Fail"||d.label==="Structural Fail"||d.label==="Critical";
                     return(
-                      <div style={{background:"white",borderRadius:12,border:`2px solid ${d.color}${isHardFail?"":"25"}`,overflow:"hidden",boxShadow:isHardFail?`0 0 0 1px ${d.color}40`:"0 1px 4px rgba(0,0,0,0.05)"}}>
-                        <div style={{padding:"10px 14px",background:d.bg,borderBottom:`1.5px solid ${d.color}30`,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-                          <div style={{display:"flex",alignItems:"center",gap:6}}>
-                            <span style={{fontSize:14}}>🧱</span>
-                            <span style={{fontSize:9,fontWeight:800,color:d.color,textTransform:"uppercase",letterSpacing:"0.08em"}}>Survival</span>
+                      <div key={name} style={{padding:"12px 16px",borderBottom:pi<2?"1px solid #f3f4f6":"none"}}>
+                        {/* Header row: PILLAR name + status inline */}
+                        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
+                          <div style={{display:"flex",alignItems:"center",gap:8}}>
+                            <span style={{fontSize:9,fontWeight:800,color:"#9ca3af",textTransform:"uppercase",letterSpacing:"0.08em"}}>{name}</span>
+                            <span style={{fontSize:11,fontWeight:700,color:isAlert?d.color:"#374151"}}>{d.icon} {d.label}</span>
                           </div>
-                          <span style={{fontSize:11,fontWeight:900,color:d.color,background:`${d.color}18`,padding:"2px 8px",borderRadius:100}}>{d.label}</span>
+                          <span style={{fontSize:9,color:"#6b7280",fontStyle:"italic",maxWidth:200,textAlign:"right",lineHeight:1.3}}>{diagnosis}</span>
                         </div>
-                        <div style={{padding:"12px 14px"}}>
-                          {[
-                            ["DSCR",           c.dscr.toFixed(2)+"x",       c.dscr>=1.25?"#059669":c.dscr>=1.05?"#d97706":"#dc2626"],
-                            ["Break-even",     (c.beo*100).toFixed(1)+"%",   c.beo<=0.85?"#059669":c.beo<=0.92?"#d97706":"#dc2626"],
-                            ["P(Neg CF)",      (monte?.pNegCF??50)+"%",      (monte?.pNegCF??50)<30?"#059669":(monte?.pNegCF??50)<60?"#d97706":"#dc2626"],
-                          ].map(([l,v,col])=>(
-                            <div key={l} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"4px 0",borderBottom:"1px solid #f9fafb",gap:4}}>
-                              <span style={{fontSize:11,color:"#9ca3af"}}>{l}</span>
-                              <span style={{fontSize:12,fontWeight:700,fontFamily:"'DM Mono',monospace",color:col}}>{v}</span>
+                        {/* Metrics strip — neutral, just data */}
+                        <div style={{display:"flex",gap:16}}>
+                          {metrics.map(([l,v])=>(
+                            <div key={l}>
+                              <div style={{fontSize:8,color:"#9ca3af",textTransform:"uppercase",fontWeight:700,letterSpacing:"0.05em",marginBottom:1}}>{l}</div>
+                              <div style={{fontSize:12,fontWeight:700,fontFamily:"'DM Mono',monospace",color:"#374151"}}>{v}</div>
                             </div>
                           ))}
-                          <div style={{marginTop:10,padding:"8px 10px",background:`${d.color}08`,borderRadius:8,border:`1px solid ${d.color}18`}}>
-                            <p style={{fontSize:10,color:"#374151",margin:0,lineHeight:1.5,fontStyle:"italic"}}>{diagnosis}</p>
-                          </div>
                         </div>
                       </div>
                     );
-                  })()}
-
-                  {/* ── INCOME QUALITY PILLAR ── */}
-                  {(()=>{
-                    const d=income;
-                    const diagnosis=
-                      d.label==="Strong"?"Property generates distributable cash flow above institutional benchmarks.":
-                      d.label==="Moderate"?"Property pays modestly. Below benchmark but positive cash-on-cash.":
-                      "Property does not produce distributable income at current inputs.";
-                    return(
-                      <div style={{background:"white",borderRadius:12,border:`2px solid ${d.color}25`,overflow:"hidden",boxShadow:"0 1px 4px rgba(0,0,0,0.05)"}}>
-                        <div style={{padding:"10px 14px",background:d.bg,borderBottom:`1.5px solid ${d.color}30`,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-                          <div style={{display:"flex",alignItems:"center",gap:6}}>
-                            <span style={{fontSize:14}}>💵</span>
-                            <span style={{fontSize:9,fontWeight:800,color:d.color,textTransform:"uppercase",letterSpacing:"0.08em"}}>Income</span>
-                          </div>
-                          <span style={{fontSize:11,fontWeight:900,color:d.color,background:`${d.color}18`,padding:"2px 8px",borderRadius:100}}>{d.label}</span>
-                        </div>
-                        <div style={{padding:"12px 14px"}}>
-                          {[
-                            ["Monthly CF",  fmtD(c.mcf)+"/mo",               c.mcf>=300?"#059669":c.mcf>=0?"#d97706":"#dc2626"],
-                            ["CoC Return",  fmtP(c.coc),                      c.coc>=0.08?"#059669":c.coc>=0.04?"#d97706":"#dc2626"],
-                            ["5yr Cash",    fmtD(income.cum5yrCF),             income.cum5yrCF>0?"#059669":"#dc2626"],
-                          ].map(([l,v,col])=>(
-                            <div key={l} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"4px 0",borderBottom:"1px solid #f9fafb",gap:4}}>
-                              <span style={{fontSize:11,color:"#9ca3af"}}>{l}</span>
-                              <span style={{fontSize:12,fontWeight:700,fontFamily:"'DM Mono',monospace",color:col}}>{v}</span>
-                            </div>
-                          ))}
-                          <div style={{marginTop:10,padding:"8px 10px",background:`${d.color}08`,borderRadius:8,border:`1px solid ${d.color}18`}}>
-                            <p style={{fontSize:10,color:"#374151",margin:0,lineHeight:1.5,fontStyle:"italic"}}>{diagnosis}</p>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })()}
-
-                  {/* ── CAPITAL EFFICIENCY PILLAR ── */}
-                  {(()=>{
-                    const d=capital;
-                    const diagnosis=
-                      d.label==="Strong"?"Capital working efficiently across amortization and cash flow.":
-                      d.label==="Moderate"?"Capital growth driven primarily by amortization. Cash contribution limited.":
-                      "Capital barely recovering through operations. Returns depend heavily on appreciation.";
-                    return(
-                      <div style={{background:"white",borderRadius:12,border:`2px solid ${d.color}25`,overflow:"hidden",boxShadow:"0 1px 4px rgba(0,0,0,0.05)"}}>
-                        <div style={{padding:"10px 14px",background:d.bg,borderBottom:`1.5px solid ${d.color}30`,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-                          <div style={{display:"flex",alignItems:"center",gap:6}}>
-                            <span style={{fontSize:14}}>🏦</span>
-                            <span style={{fontSize:9,fontWeight:800,color:d.color,textTransform:"uppercase",letterSpacing:"0.08em"}}>Capital</span>
-                          </div>
-                          <span style={{fontSize:11,fontWeight:900,color:d.color,background:`${d.color}18`,padding:"2px 8px",borderRadius:100}}>{d.label}</span>
-                        </div>
-                        <div style={{padding:"12px 14px"}}>
-                          {[
-                            ["Cash Required",  fmtD(c.ti),                                   "#374151"],
-                            ["5yr Paydown",    fmtD(capital.paydown5),                        "#059669"],
-                            ["Efficiency",     (capital.ratio*100).toFixed(0)+"%",             d.color],
-                          ].map(([l,v,col])=>(
-                            <div key={l} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"4px 0",borderBottom:"1px solid #f9fafb",gap:4}}>
-                              <span style={{fontSize:11,color:"#9ca3af"}}>{l}</span>
-                              <span style={{fontSize:12,fontWeight:700,fontFamily:"'DM Mono',monospace",color:col}}>{v}</span>
-                            </div>
-                          ))}
-                          <div style={{marginTop:10,padding:"8px 10px",background:`${d.color}08`,borderRadius:8,border:`1px solid ${d.color}18`}}>
-                            <p style={{fontSize:10,color:"#374151",margin:0,lineHeight:1.5,fontStyle:"italic"}}>{diagnosis}</p>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })()}
-
+                  })}
                 </div>
 
                 {/* C: HARD FAIL SECTION */}
