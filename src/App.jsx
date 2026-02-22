@@ -791,10 +791,6 @@ function runMonteCarlo(metrics, strategy, runs=1000) {
     median, worst10, runs,
   };
 }
-    pCapInfusion:Math.round(capitalInfusion/runs*100),
-    runs,
-  };
-}
 
 // ── EXIT SCENARIO MODELING ──
 function calcExitScenarios(metrics, strategy) {
@@ -5203,4 +5199,3 @@ export default function Root() {
     {page==="profile"&&user&&<ProfilePage user={user} profile={profile} onUpdate={handleProfileUpdate} onSignOut={handleSignOut} onBack={()=>setPage("app")}/>}
   </>);
 }
-
