@@ -1175,7 +1175,7 @@ function DecisionMode({metrics, strategy, isPro, onActivatePro, allDeals=[], cur
 
 // ══ SCORING ENGINE v2 — Deterministic weighted components ══
 function calcRentalScore(metrics, strategyFit="cashflow") {
-  const {mcf=0,coc=0,dscr=0,beo=0,ltv=0,rent=0,expenses=0,mortgage=0,pp=0,rate=7.5,ti=0} = metrics;
+  const {mcf=0,coc=0,dscr=0,beo=0,ltv=0,rent=0,expenses=0,mortgage=0,pp=0,rate=7.5,ti=0,down=20,term=30,capex=0,cc=0,rehab=0} = metrics;
 
   // ── 6 component scores (each 0–100) ──
   // 1. Cash Flow Health — 30%
@@ -1640,7 +1640,7 @@ function RentalCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro,al
 
           <InputSection title="Operating Expenses" accent="#6b7280" defaultOpen={false} badge={`${fmtD(totalExp)}/mo`}>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-              {[["Taxes",sv("taxes"),i.taxes,25],["Insurance",sv("ins"),i.insurance,10],["Vacancy",sv("vacancy"),i.vacancy,25],["Repairs",sv("repairs"),i.repairs,25],["CapEx",sv("capex"),i.capex,25],["Mgmt",sv("mgmt"),i.mgmt,25],["Utilities",sv("utilities"),i.utilities,25],["HOA",sv("hoa"),i.hoa,25]]
+              {[["Taxes",sv("taxes"),i.taxes,25],["Insurance",sv("insurance"),i.insurance,10],["Vacancy",sv("vacancy"),i.vacancy,25],["Repairs",sv("repairs"),i.repairs,25],["CapEx",sv("capex"),i.capex,25],["Mgmt",sv("mgmt"),i.mgmt,25],["Utilities",sv("utilities"),i.utilities,25],["HOA",sv("hoa"),i.hoa,25]]
               .map(([l,fn,v,s])=><NF key={l} label={l} value={v} onChange={fn} prefix="$" step={s}/>)}
             </div>
           </InputSection>
