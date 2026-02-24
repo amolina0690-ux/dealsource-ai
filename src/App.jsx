@@ -1452,6 +1452,42 @@ function calcPortfolioImpact(newMetrics, existingDeals=[]) {
   };
 }
 
+// ══ CHART COMPONENTS ═══════════════════════════════════════════════════════
+
+function LineChart({data, color="#10b981", height=100, fill=true}) {
+  if(!data||data.length<2) return null;
+  const vals = data.map(d=>d.y).filter(v=>isFinite(v));
+  if(!vals.length) return null;
+  const min=Math.min(0,...vals);
+  const max=Math.max(...vals,1);
+  const W=300, H=height, pad=4;
+  const range = max-min||1;
+  const xScale=i=>(i/(data.length-1))*(W-pad*2)+pad;
+  const yScale=v=>H-pad-(((v-min)/range)*(H-pad*2));
+  const pts=data.map((d,i)=>`${xScale(i)},${yScale(d.y)}`).join(" ");
+  const fillPts=`${pad},${H-pad} ${pts} ${W-pad},${H-pad}`;
+  const zeroY=yScale(0);
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{width:"100%",height,overflow:"visible"}}>
+      <defs>
+        <linearGradient id={`lg-${color.replace("#","")}`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={color} stopOpacity="0.25"/>
+          <stop offset="100%" stopColor={color} stopOpacity="0.02"/>
+        </linearGradient>
+      </defs>
+      {min<0&&<line x1={pad} y1={zeroY} x2={W-pad} y2={zeroY} stroke="#e5e7eb" strokeWidth="1" strokeDasharray="4,3"/>}
+      {fill&&<polygon points={fillPts} fill={`url(#lg-${color.replace("#","")})`}/>}
+      <polyline points={pts} fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+      {data.map((d,i)=>(
+        <g key={i}>
+          <circle cx={xScale(i)} cy={yScale(d.y)} r="3.5" fill={d.y>=0?color:"#dc2626"} stroke="white" strokeWidth="1.5"/>
+          <text x={xScale(i)} y={H} textAnchor="middle" fontSize="8" fill="#9ca3af">{d.label}</text>
+        </g>
+      ))}
+    </svg>
+  );
+}
+
 // ══ SHARED INPUT COMPONENTS ════════════════════════════════════════════════
 
 function InputSection({title, accent="#10b981", children, badge, defaultOpen=true}) {
