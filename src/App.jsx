@@ -1452,6 +1452,62 @@ function calcPortfolioImpact(newMetrics, existingDeals=[]) {
   };
 }
 
+// ══ SHARED INPUT COMPONENTS ════════════════════════════════════════════════
+
+function InputSection({title, accent="#10b981", children, badge, defaultOpen=true}) {
+  const [open,setOpen]=useState(defaultOpen);
+  return(
+    <div style={{background:"white",borderRadius:12,border:"1.5px solid #f0f0f0",overflow:"hidden",boxShadow:"0 1px 3px rgba(0,0,0,0.04)"}}>
+      <button onClick={()=>setOpen(o=>!o)} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 16px",background:"none",border:"none",cursor:"pointer",borderBottom:open?"1px solid #f9fafb":"none"}}>
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          <div style={{width:3,height:14,borderRadius:2,background:accent,flexShrink:0}}/>
+          <span style={{fontSize:11,fontWeight:700,color:"#374151",textTransform:"uppercase",letterSpacing:"0.07em"}}>{title}</span>
+          {badge&&<span style={{fontSize:10,fontFamily:"'DM Mono',monospace",color:"#6b7280",background:"#f3f4f6",padding:"2px 8px",borderRadius:100}}>{badge}</span>}
+        </div>
+        <span style={{fontSize:11,color:"#9ca3af",transform:open?"rotate(180deg)":"none",transition:"transform 0.2s"}}>▼</span>
+      </button>
+      {open&&<div style={{padding:"12px 16px 14px"}}>{children}</div>}
+    </div>
+  );
+}
+
+function NF({label, value, onChange, prefix, suffix, step=1, min=0}) {
+  const [focused,setFocused]=useState(false);
+  return(
+    <div>
+      {label&&<div style={{fontSize:10,fontWeight:600,color:"#9ca3af",textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:4}}>{label}</div>}
+      <div style={{display:"flex",alignItems:"center",border:`1.5px solid ${focused?"#10b981":"#e5e7eb"}`,borderRadius:8,background:"white",overflow:"hidden",transition:"border-color 0.15s"}}>
+        {prefix&&<span style={{fontSize:12,color:"#9ca3af",paddingLeft:9,flexShrink:0}}>{prefix}</span>}
+        <input type="number" value={value} onChange={e=>onChange(e.target.value)}
+          onFocus={()=>setFocused(true)} onBlur={()=>setFocused(false)}
+          style={{flex:1,border:"none",outline:"none",fontSize:14,fontWeight:600,color:"#111827",fontFamily:"'DM Mono',monospace",padding:"8px 4px",background:"transparent",minWidth:0}}/>
+        {suffix&&<span style={{fontSize:11,color:"#9ca3af",paddingRight:8,flexShrink:0}}>{suffix}</span>}
+        <div style={{display:"flex",flexDirection:"column",borderLeft:"1px solid #f3f4f6"}}>
+          <button onClick={()=>onChange(Math.max(min,+value+step))} style={{border:"none",background:"none",cursor:"pointer",padding:"4px 7px",fontSize:9,color:"#9ca3af",lineHeight:1,display:"flex",alignItems:"center"}}>▲</button>
+          <button onClick={()=>onChange(Math.max(min,+value-step))} style={{border:"none",background:"none",cursor:"pointer",padding:"4px 7px",fontSize:9,color:"#9ca3af",lineHeight:1,borderTop:"1px solid #f3f4f6",display:"flex",alignItems:"center"}}>▼</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function OSlider({label, value, onChange, min, max, step=1, display}) {
+  return(
+    <div style={{marginBottom:12}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:5}}>
+        <span style={{fontSize:10,fontWeight:600,color:"#6b7280",textTransform:"uppercase",letterSpacing:"0.06em"}}>{label}</span>
+        <span style={{fontSize:12,fontWeight:700,fontFamily:"'DM Mono',monospace",color:"#059669"}}>{display?display(value):value}</span>
+      </div>
+      <input type="range" min={min} max={max} step={step} value={value} onChange={e=>onChange(+e.target.value)}
+        style={{width:"100%",accentColor:"#059669",cursor:"pointer"}}/>
+      <div style={{display:"flex",justifyContent:"space-between",marginTop:2}}>
+        <span style={{fontSize:9,color:"#9ca3af"}}>{display?display(min):min}</span>
+        <span style={{fontSize:9,color:"#9ca3af"}}>{display?display(max):max}</span>
+      </div>
+    </div>
+  );
+}
+
 // ══ MAIN RENTAL CALC v7 ════════════════════════════════════════════════════
 function RentalCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro,allDeals=[],currentDealId=null}) {
   const [addr,setAddr]       = useState(saved?.address||"");
