@@ -1737,15 +1737,13 @@ function RentalCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro,al
             </div>
           </InputSection>
 
-          {viewMode==="projection"&&(
-            <InputSection title="Growth Assumptions" accent="#7c3aed" defaultOpen={false}>
-              <div style={{display:"flex",flexDirection:"column",gap:8}}>
-                <NF label="Appreciation %" value={i.appreciation||3} onChange={sv("appreciation")} suffix="%" step={0.5}/>
-                <NF label="Rent Growth %" value={i.rentGrowth||2} onChange={sv("rentGrowth")} suffix="%" step={0.5}/>
-                <NF label="Expense Inflation %" value={i.expenseGrowth||2} onChange={sv("expenseGrowth")} suffix="%" step={0.5}/>
-              </div>
-            </InputSection>
-          )}
+          <InputSection title="Growth Assumptions" accent="#7c3aed" key={`grow-${viewMode}`} defaultOpen={viewMode==="projection"}>
+            <div style={{display:"flex",flexDirection:"column",gap:8}}>
+              <NF label="Appreciation %" value={i.appreciation||3} onChange={sv("appreciation")} suffix="%" step={0.5}/>
+              <NF label="Rent Growth %" value={i.rentGrowth||2} onChange={sv("rentGrowth")} suffix="%" step={0.5}/>
+              <NF label="Expense Inflation %" value={i.expenseGrowth||2} onChange={sv("expenseGrowth")} suffix="%" step={0.5}/>
+            </div>
+          </InputSection>
         </div>
 
         {/* ── RIGHT: MODE CONTENT ── */}
@@ -2044,31 +2042,29 @@ function RentalCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro,al
 
           {/* ════ PROJECTION MODE ════ */}
           {viewMode==="projection"&&(
-            <ProGate isPro={isPro} trigger="unlock" onActivatePro={onActivatePro}>
-              <>
-                <div style={{background:"white",borderRadius:12,border:"1.5px solid #e5e7eb",padding:"16px",boxShadow:"0 1px 4px rgba(0,0,0,0.05)"}}>
-                  <div style={{fontSize:10,fontWeight:700,color:"#9ca3af",textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:12}}>📊 Hold Projection</div>
-                  <LineChart data={cfChartData} color="#059669" height={100}/>
-                  <div style={{marginTop:12}}>
-                    <table style={{width:"100%",borderCollapse:"collapse"}}>
-                      <thead><tr style={{borderBottom:"2px solid #f3f4f6"}}>
-                        {["Year","Rent","Value","Equity","Mo. CF"].map(h=><th key={h} style={{padding:"7px 8px",textAlign:h==="Year"?"left":"right",fontSize:10,fontWeight:700,color:"#9ca3af",textTransform:"uppercase",letterSpacing:"0.05em"}}>{h}</th>)}
-                      </tr></thead>
-                      <tbody>
-                        {c.proj.map((p,pi)=>(
-                          <tr key={p.yr} style={{borderBottom:"1px solid #f9fafb",background:pi%2===0?"white":"#fafafa"}}>
-                            <td style={{padding:"7px 8px",fontSize:11,color:"#374151",fontWeight:600}}>Year {p.yr}</td>
-                            <td style={{padding:"7px 10px",textAlign:"right",fontFamily:"'DM Mono',monospace",color:"#374151",fontSize:11}}>{fmtD(p.rent)}/mo</td>
-                            <td style={{padding:"7px 10px",textAlign:"right",fontFamily:"'DM Mono',monospace",color:"#374151",fontSize:11}}>{fmtM(p.val)}</td>
-                            <td style={{padding:"7px 10px",textAlign:"right",fontFamily:"'DM Mono',monospace",color:"#059669",fontSize:11}}>{fmtM(p.equity)}</td>
-                            <td style={{padding:"7px 10px",textAlign:"right",fontFamily:"'DM Mono',monospace",color:p.mcf>=0?"#059669":"#dc2626",fontWeight:700}}>{fmtD(p.mcf)}</td>
-                          </tr>
-                        ))}</tbody>
-                    </table>
-                  </div>
+            <div style={{display:"flex",flexDirection:"column",gap:14}}>
+              <div style={{background:"white",borderRadius:12,border:"1.5px solid #e5e7eb",padding:"16px",boxShadow:"0 1px 4px rgba(0,0,0,0.05)"}}>
+                <div style={{fontSize:10,fontWeight:700,color:"#9ca3af",textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:12}}>📊 Hold Projection</div>
+                <LineChart data={cfChartData} color="#059669" height={100}/>
+                <div style={{marginTop:12}}>
+                  <table style={{width:"100%",borderCollapse:"collapse"}}>
+                    <thead><tr style={{borderBottom:"2px solid #f3f4f6"}}>
+                      {["Year","Rent","Value","Equity","Mo. CF"].map(h=><th key={h} style={{padding:"7px 8px",textAlign:h==="Year"?"left":"right",fontSize:10,fontWeight:700,color:"#9ca3af",textTransform:"uppercase",letterSpacing:"0.05em"}}>{h}</th>)}
+                    </tr></thead>
+                    <tbody>
+                      {c.proj.map((p,pi)=>(
+                        <tr key={p.yr} style={{borderBottom:"1px solid #f9fafb",background:pi%2===0?"white":"#fafafa"}}>
+                          <td style={{padding:"7px 8px",fontSize:11,color:"#374151",fontWeight:600}}>Year {p.yr}</td>
+                          <td style={{padding:"7px 10px",textAlign:"right",fontFamily:"'DM Mono',monospace",color:"#374151",fontSize:11}}>{fmtD(p.rent)}/mo</td>
+                          <td style={{padding:"7px 10px",textAlign:"right",fontFamily:"'DM Mono',monospace",color:"#374151",fontSize:11}}>{fmtM(p.val)}</td>
+                          <td style={{padding:"7px 10px",textAlign:"right",fontFamily:"'DM Mono',monospace",color:"#059669",fontSize:11}}>{fmtM(p.equity)}</td>
+                          <td style={{padding:"7px 10px",textAlign:"right",fontFamily:"'DM Mono',monospace",color:p.mcf>=0?"#059669":"#dc2626",fontWeight:700}}>{fmtD(p.mcf)}</td>
+                        </tr>
+                      ))}</tbody>
+                  </table>
                 </div>
-              </>
-            </ProGate>
+              </div>
+            </div>
           )}
         </div>
       </div>
