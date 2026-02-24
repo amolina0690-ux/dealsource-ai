@@ -1263,15 +1263,24 @@ function uw_capitalScore(metrics) {
   const eqGain = eq5 - pp*(down/100);
   const equityMultiple = ti>0 ? (eqGain+cf5)/ti : 0;
   const irrCFs = [-ti, ...Array.from({length:5},(_,yr)=>mcf*12 + (yr===4?eq5-loan:0))];
-  const irr = calcIRR(irrCFs);
+  const rawIrr = calcIRR(irrCFs);
+  const irr = (rawIrr!=null && isFinite(rawIrr) && Math.abs(rawIrr)<=2.0) ? rawIrr : null;
   const amorDep = (pd5>0&&cf5+pd5>0) ? pd5/(pd5+cf5) : 1;
 
   const pd5Score  = ti>0 ? Math.min(100, Math.round(pd5/ti*300)) : 0;
   const emScore   = Math.min(100, Math.round((equityMultiple||0)*50));
-  const irrScore  = irr!=null ? Math.min(100, Math.round((irr||0)*500)) : 30;
   const levScore  = 100 - Math.round(amorDep*100);
+  // Year multipliers for display (Y5/Y10/Y20)
+  const val10 = pp*Math.pow(1+appreciation/100,10);
+  const bal10 = loanBalance(loan,rate,term,10);
+  const eq10  = val10-bal10;
+  const em10  = ti>0 ? +((eq10+mcf*12*10)/ti).toFixed(2) : 0;
+  const val20 = pp*Math.pow(1+appreciation/100,20);
+  const bal20 = loanBalance(loan,rate,term,20);
+  const eq20  = val20-bal20;
+  const em20  = ti>0 ? +((eq20+mcf*12*20)/ti).toFixed(2) : 0;
 
-  const score = Math.min(100, Math.max(0, Math.round(pd5Score*0.30 + emScore*0.25 + irrScore*0.30 + levScore*0.15)));
+  const score = Math.min(100, Math.max(0, Math.round(pd5Score*0.35 + emScore*0.35 + levScore*0.30)));
 
   let label, color;
   if(score>=75)     {label="Strong";   color="#059669";}
@@ -1279,14 +1288,15 @@ function uw_capitalScore(metrics) {
   else              {label="Low";      color="#dc2626";}
 
   return {score, label, color, pd5:Math.round(pd5), eq5:Math.round(eq5), eqGain:Math.round(eqGain),
-          equityMultiple:+equityMultiple.toFixed(2), irr, amorDep:+amorDep.toFixed(2)};
+          equityMultiple:+equityMultiple.toFixed(2), em10, em20,
+          irr, amorDep:+amorDep.toFixed(2)};
 }
 
 function uw_compositeScore(survival, income, capital, riskTol="standard") {
   const cfg = RISK_CONFIG[riskTol] || RISK_CONFIG.standard;
-  if(survival.isFail) return {score:0, verdict:"Structural Fail", confidence:"High",
-    primaryRisk:"Structural failure — debt service or occupancy requirements unserviceable.",
-    color:"#dc2626", bg:"#fef2f2", icon:"⛔"};
+  if(survival.isFail) return {score:0, verdict:"Avoid", confidence:"High",
+    primaryRisk:"Structural failure — debt service cannot be met at current terms.",
+    color:"#dc2626", bg:"#fef2f2", icon:"🚫"};
 
   const score = Math.round(survival.score*cfg.survivalW + income.score*cfg.incomeW + capital.score*cfg.capitalW);
 
@@ -1299,12 +1309,16 @@ function uw_compositeScore(survival, income, capital, riskTol="standard") {
     Math.abs(score-50) > 30 ? "High" : Math.abs(score-50) > 15 ? "Moderate" : "Low";
 
   let verdict, color, bg, icon;
-  if(score>=82)     {verdict="Strong Buy";    color="#059669"; bg="#f0fdf4"; icon="🎯";}
-  else if(score>=65){verdict="Buy";           color="#2563eb"; bg="#eff6ff"; icon="✅";}
-  else if(score>=50){verdict="Conditional";   color="#0891b2"; bg="#ecfeff"; icon="⚙️";}
-  else if(score>=35){verdict="Speculative";   color="#d97706"; bg="#fffbeb"; icon="⚠️";}
-  else if(score>=20){verdict="Avoid";         color="#ea580c"; bg="#fff7ed"; icon="🚫";}
-  else              {verdict="Structural Fail"; color="#dc2626"; bg="#fef2f2"; icon="⛔";}
+  // Logic-driven verdict (spec §6)
+  const _v = (()=>{
+    if(survival.isFail||survival.score<20) return {v:"Avoid",            c:"#dc2626",b:"#fef2f2",i:"🚫"};
+    if(survival.score<60)                  return {v:"Speculative",      c:"#d97706",b:"#fffbeb",i:"⚠️"};
+    if(capital.score<40&&survival.score>=70) return {v:"Proceed w/ Caution",c:"#0891b2",b:"#ecfeff",i:"🔍"};
+    if(survival.score>=70&&income.score>=60) return {v:"Buy",            c:"#2563eb",b:"#eff6ff",i:"✅"};
+    if(survival.score>=82&&income.score>=75) return {v:"Strong Buy",     c:"#059669",b:"#f0fdf4",i:"🎯"};
+    return {v:"Proceed w/ Caution",           c:"#0891b2",b:"#ecfeff",  i:"🔍"};
+  })();
+  verdict=_v.v; color=_v.c; bg=_v.b; icon=_v.i;
 
   return {score, verdict, confidence, primaryRisk, color, bg, icon};
 }
@@ -1787,66 +1801,84 @@ function RentalCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro,al
 
           {/* ════ SNAPSHOT MODE ════ */}
           {viewMode==="snapshot"&&(<>
-            <div style={{background:"white",borderRadius:12,border:`2px solid ${snapColor}30`,overflow:"hidden",boxShadow:"0 1px 4px rgba(0,0,0,0.05)"}}>
-              <div style={{background:snapColor+"15",padding:"12px 16px",borderBottom:`1px solid ${snapColor}20`,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-                <div>
-                  <div style={{fontSize:11,fontWeight:700,color:snapColor,textTransform:"uppercase",letterSpacing:"0.07em"}}>Screening Result</div>
-                  <div style={{fontSize:10,color:"#6b7280",marginTop:2}}>4 pass/fail criteria · {riskTol} tolerance</div>
-                </div>
-                <div style={{fontSize:22,fontWeight:900,color:snapColor,fontFamily:"'DM Mono',monospace"}}>{snapResult}</div>
-              </div>
-              <div style={{padding:"10px 16px"}}>
-                {snapFlags.map((f,idx)=>(
-                  <div key={f.label} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"7px 0",borderBottom:idx<3?"1px solid #f9fafb":"none",gap:8}}>
-                    <div style={{display:"flex",alignItems:"center",gap:8}}>
-                      <span style={{fontSize:13}}>{f.pass?"✅":"❌"}</span>
-                      <span style={{fontSize:12,color:"#374151",fontWeight:600}}>{f.label}</span>
-                    </div>
-                    <span style={{fontSize:12,fontFamily:"'DM Mono',monospace",color:f.pass?"#059669":"#dc2626",fontWeight:700}}>{f.value}</span>
+            {/* Verdict badge */}
+            <div style={{background:vBg,borderRadius:12,border:`2px solid ${vColor}30`,padding:"16px 18px"}}>
+              <div style={{fontSize:9,fontWeight:700,color:vColor,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:5}}>Screening Result · {riskTol} tolerance</div>
+              <div style={{fontSize:28,fontWeight:900,color:vColor,lineHeight:1,marginBottom:6}}>{vIcon} {verdict}</div>
+              <div style={{fontSize:13,color:"#374151",lineHeight:1.5,fontStyle:"italic",marginBottom:12}}>{dealIdentity}</div>
+              {/* Core metrics — 3+3 grid */}
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6,marginBottom:10}}>
+                {[
+                  ["Cash Flow",  fmtD(c.mcf)+"/mo",  c.mcf>=0?"#059669":"#dc2626"],
+                  ["DSCR",       c.dscr.toFixed(2)+"x", c.dscr>=1.25?"#059669":c.dscr>=1.1?"#d97706":"#dc2626"],
+                  ["CoC",        fmtP(c.coc),         c.coc>=0.08?"#059669":c.coc>=0.04?"#d97706":"#dc2626"],
+                  ["Cap Rate",   fmtP(c.capRate),     "#374151"],
+                  ["Break-even", fmtP(c.beo),         c.beo<=0.85?"#059669":c.beo<=0.92?"#d97706":"#dc2626"],
+                  ["Cash Req.",  fmtD(c.ti),          "#374151"],
+                ].map(([l,v,col])=>(
+                  <div key={l} style={{background:"rgba(255,255,255,0.6)",border:"1px solid #f0f0f0",borderRadius:8,padding:"8px 10px"}}>
+                    <div style={{fontSize:8,color:"#9ca3af",textTransform:"uppercase",fontWeight:700,letterSpacing:"0.05em",marginBottom:2}}>{l}</div>
+                    <div style={{fontSize:13,fontWeight:800,fontFamily:"'DM Mono',monospace",color:col}}>{v}</div>
                   </div>
                 ))}
               </div>
-              <div style={{padding:"10px 16px",borderTop:"1px solid #f9fafb",display:"flex",gap:8}}>
-                <button onClick={()=>setViewMode("decision")} style={{flex:1,padding:"8px",borderRadius:8,border:"none",background:"#111827",color:"white",fontSize:11,fontWeight:700,cursor:"pointer"}}>🧠 Full Analysis</button>
-                <button onClick={()=>setViewMode("projection")} style={{flex:1,padding:"8px",borderRadius:8,border:"1.5px solid #e5e7eb",background:"white",color:"#374151",fontSize:11,fontWeight:600,cursor:"pointer"}}>📊 Projection</button>
+              {/* Risk flags */}
+              <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
+                {[
+                  survival.score<60   && {label:"⚠️ Vacancy sensitive",   color:"#dc2626"},
+                  survival.refiVuln==="High" && {label:"⚠️ Refi risk",     color:"#d97706"},
+                  c.beo>0.92          && {label:"⚠️ Thin margin",          color:"#d97706"},
+                  c.mcf<100&&c.mcf>=0 && {label:"⚠️ Marginal cash flow",   color:"#d97706"},
+                  income.durGrade==="F"&& {label:"⚠️ Income unsustainable", color:"#dc2626"},
+                ].filter(Boolean).map((f,fi)=>(
+                  <span key={fi} style={{fontSize:9,fontWeight:700,color:f.color,background:f.color+"15",padding:"3px 8px",borderRadius:100}}>{f.label}</span>
+                ))}
+                {survival.score>=70&&income.score>=60&&<span style={{fontSize:9,fontWeight:700,color:"#059669",background:"#f0fdf4",padding:"3px 8px",borderRadius:100}}>✅ Passes screening</span>}
               </div>
             </div>
-
-            {/* Deal Snapshot */}
-            <div style={{background:"white",borderRadius:12,border:"1.5px solid #e5e7eb",padding:"16px",boxShadow:"0 1px 4px rgba(0,0,0,0.05)"}}>
-              <div style={{fontSize:10,fontWeight:700,color:"#9ca3af",textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:14}}>Deal Snapshot</div>
-              {[
-                ["Monthly Cash Flow", fmtD(c.mcf)+"/mo",       c.mcf>=0?"#059669":"#dc2626", true],
-                ["DSCR",             c.dscr.toFixed(2)+"x",   c.dscr>=1.25?"#059669":c.dscr>=1.15?"#d97706":"#dc2626", false],
-                ["Cash-on-Cash ROI", fmtP(c.coc),             c.coc>=0.08?"#059669":c.coc>=0.04?"#d97706":"#dc2626", false],
-                ["Cap Rate",         fmtP(c.capRate),          "#374151", false],
-                ["Break-even Occ.",  fmtP(c.beo),             c.beo<=0.85?"#059669":c.beo<=0.90?"#d97706":"#dc2626", false],
-                ["Cash Required",    fmtD(c.ti),               "#374151", false],
-                ["Annual Cash Flow", fmtD(c.acf),             c.acf>=0?"#059669":"#dc2626", false],
-                ["Survival Score",   survival.score+"/100",    survival.color, false],
-              ].map(([l,v,col,hl],idx,arr)=>(
-                <div key={l} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:idx<arr.length-1?"1px solid #f9fafb":"none",gap:8}}>
-                  <span style={{fontSize:12,color:"#6b7280",flex:1}}>{l}</span>
-                  <span style={{fontSize:hl?15:13,fontWeight:hl?800:600,fontFamily:"'DM Mono',monospace",color:col,flexShrink:0}}>{v}</span>
+            {/* Pass/fail checklist */}
+            <div style={{background:"white",borderRadius:12,border:"1.5px solid #e5e7eb",overflow:"hidden"}}>
+              <div style={{padding:"10px 16px",borderBottom:"1px solid #f3f4f6",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <span style={{fontSize:10,fontWeight:700,color:"#374151",textTransform:"uppercase",letterSpacing:"0.07em"}}>Checklist</span>
+                <span style={{fontSize:10,color:"#6b7280"}}>{snapFlags.filter(f=>f.pass).length}/4 pass</span>
+              </div>
+              {snapFlags.map((f,idx)=>(
+                <div key={f.label} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"9px 16px",borderBottom:idx<3?"1px solid #f9fafb":"none",gap:8}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8}}>
+                    <span style={{fontSize:13}}>{f.pass?"✅":"❌"}</span>
+                    <span style={{fontSize:12,color:"#374151",fontWeight:500}}>{f.label}</span>
+                  </div>
+                  <span style={{fontSize:12,fontFamily:"'DM Mono',monospace",color:f.pass?"#059669":"#dc2626",fontWeight:700}}>{f.value}</span>
                 </div>
               ))}
+            </div>
+            <div style={{display:"flex",gap:8}}>
+              <button onClick={()=>setViewMode("decision")} style={{flex:1,padding:"10px",borderRadius:8,border:"none",background:"#111827",color:"white",fontSize:11,fontWeight:700,cursor:"pointer"}}>🧠 Full Analysis →</button>
+              <button onClick={()=>setViewMode("projection")} style={{flex:1,padding:"10px",borderRadius:8,border:"1.5px solid #e5e7eb",background:"white",color:"#374151",fontSize:11,fontWeight:600,cursor:"pointer"}}>📊 Projection →</button>
             </div>
           </>)}
 
           {/* ════ DECISION MODE ════ */}
           {viewMode==="decision"&&(
             <ProGate isPro={isPro} trigger="unlock" onActivatePro={onActivatePro}>
-              <>
-                {/* ── VERDICT CARD ── */}
+              <div style={{display:"flex",flexDirection:"column",gap:14}}>
+
+                {/* 1. VERDICT */}
                 <div style={{background:vBg,borderRadius:12,border:`2px solid ${vColor}30`,padding:"16px 18px"}}>
                   <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>
-                    <div style={{flex:1,minWidth:180}}>
-                      <div style={{fontSize:9,fontWeight:700,color:vColor,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:5}}>Capital Allocation Engine</div>
-                      <div style={{fontSize:26,fontWeight:900,color:vColor,lineHeight:1,marginBottom:6}}>{vIcon} {verdict}</div>
-                      <div style={{fontSize:13,color:"#374151",lineHeight:1.5,marginBottom:4,fontStyle:"italic"}}>{dealIdentity}</div>
-                      <div style={{display:"flex",alignItems:"center",gap:6}}>
-                        <span style={{fontSize:22,fontWeight:900,fontFamily:"'DM Mono',monospace",color:vColor}}>{vScore}</span>
-                        <span style={{fontSize:10,color:"#6b7280"}}>/ 100 · {confidence} confidence</span>
+                    <div style={{flex:1,minWidth:160}}>
+                      <div style={{fontSize:9,fontWeight:700,color:vColor,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:6}}>Capital Allocation Engine</div>
+                      <div style={{fontSize:28,fontWeight:900,color:vColor,lineHeight:1,marginBottom:8}}>{vIcon} {verdict}</div>
+                      <div style={{fontSize:12,color:"#374151",lineHeight:1.5,marginBottom:8,fontStyle:"italic"}}>{dealIdentity}</div>
+                      <div style={{display:"flex",gap:16,flexWrap:"wrap"}}>
+                        <div>
+                          <div style={{fontSize:8,color:"#9ca3af",textTransform:"uppercase",fontWeight:700,marginBottom:2}}>Composite Score</div>
+                          <span style={{fontSize:20,fontWeight:900,fontFamily:"'DM Mono',monospace",color:vColor}}>{vScore}<span style={{fontSize:11,color:"#9ca3af",fontWeight:400}}>/100</span></span>
+                        </div>
+                        <div>
+                          <div style={{fontSize:8,color:"#9ca3af",textTransform:"uppercase",fontWeight:700,marginBottom:2}}>Primary Risk</div>
+                          <div style={{fontSize:11,fontWeight:700,color:"#374151"}}>{primaryRisk}</div>
+                        </div>
                       </div>
                     </div>
                     <div style={{flexShrink:0}}>
@@ -1863,153 +1895,141 @@ function RentalCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro,al
                   </div>
                 </div>
 
-                {/* ── PANEL 1: DEAL ANALYSIS (Underwriting + Screening merged) ── */}
-                <div style={{background:"white",borderRadius:12,border:"1.5px solid #f0f0f0",overflow:"hidden",boxShadow:"0 1px 4px rgba(0,0,0,0.04)"}}>
-                  <div style={{padding:"10px 16px",borderBottom:"1px solid #f3f4f6",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-                    <span style={{fontSize:10,fontWeight:700,color:"#374151",textTransform:"uppercase",letterSpacing:"0.07em"}}>Deal Analysis</span>
-                    <span style={{fontSize:10,color:"#9ca3af"}}>Weights: {Math.round(RISK_CONFIG[riskTol].survivalW*100)}% / {Math.round(RISK_CONFIG[riskTol].incomeW*100)}% / {Math.round(RISK_CONFIG[riskTol].capitalW*100)}%</span>
+                {/* 2. SURVIVAL & RISK ENGINE */}
+                <div style={{background:"white",borderRadius:12,border:"1.5px solid #f0f0f0",overflow:"hidden",boxShadow:"0 1px 3px rgba(0,0,0,0.04)"}}>
+                  <div style={{padding:"10px 16px",borderBottom:"1px solid #f3f4f6",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <span style={{fontSize:10,fontWeight:700,color:"#374151",textTransform:"uppercase",letterSpacing:"0.07em"}}>Survival & Risk</span>
+                    <div style={{display:"flex",alignItems:"center",gap:5}}>
+                      <div style={{width:8,height:8,borderRadius:"50%",background:risk.survivalProb>=80?"#059669":risk.survivalProb>=60?"#d97706":"#dc2626"}}/>
+                      <span style={{fontSize:12,fontWeight:800,fontFamily:"'DM Mono',monospace",color:risk.survivalProb>=80?"#059669":risk.survivalProb>=60?"#d97706":"#dc2626"}}>{risk.survivalProb}%</span>
+                      <span style={{fontSize:9,color:"#9ca3af"}}>survived</span>
+                    </div>
                   </div>
-                  {[
-                    {name:"Survival", d:survival, chips:[
-                      ["DSCR",c.dscr.toFixed(2)+"x"],["BEO",(c.beo*100).toFixed(1)+"%"],
-                      ["Refi DSCR",survival.refiDSCR+"x"],["Refi Risk",survival.refiVuln]],
-                      diag: survival.isFail?"Structural failure — debt service or occupancy threshold cannot be met.":
-                            survival.label==="Critical"?"Near-zero margin. One stress event eliminates coverage.":
-                            survival.label==="Fragile"?"Coverage fragile — one vacancy event tests break-even.":
-                            survival.label==="Stable"?"Coverage adequate. Stress margin is limited but present.":
-                            "Debt well covered. Vacancy buffer is healthy."},
-                    {name:"Income",   d:income,   chips:[
-                      ["Monthly CF",fmtD(c.mcf)+"/mo"],["CoC",fmtP(c.coc)],
-                      ["5yr CF",fmtD(income.cum5)],["Durability",income.durGrade]],
-                      diag: income.label==="Weak"?"Property does not produce distributable income at current inputs.":
-                            income.label==="Moderate"?"Pays modestly — below benchmark but positive carry.":
-                            "Above-benchmark cash flow. Income is real and durable."},
-                    {name:"Capital",  d:capital,  chips:[
-                      ["5yr Paydown",fmtD(capital.pd5)],["Equity ×",capital.equityMultiple+"x"],
-                      ["Capital Rcvry",capRecovery.yrs?capRecovery.yrs+" yrs":"Long"],["Amor. Dep.",(capital.amorDep*100).toFixed(0)+"%"]],
-                      diag: capital.label==="Low"?"Returns depend heavily on appreciation. Cash flow barely recovers capital.":
-                            capital.label==="Moderate"?"Capital growth driven mainly by amortization with limited cash contribution.":
-                            "Capital working efficiently — strong equity build and cash returns."},
-                  ].map(({name,d,chips,diag},pi)=>{
-                    const isAlert=d.isFail||d.label==="Critical"||d.label==="Weak"||d.label==="Low";
-                    return(
-                      <div key={name} style={{padding:"13px 16px",borderBottom:pi<2?"1px solid #f3f4f6":"none"}}>
-                        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:7}}>
-                          <span style={{fontSize:9,fontWeight:800,color:"#9ca3af",textTransform:"uppercase",letterSpacing:"0.08em",width:52,flexShrink:0}}>{name}</span>
-                          <div style={{flex:1,height:5,background:"#f3f4f6",borderRadius:3,overflow:"hidden"}}>
-                            <div style={{height:"100%",width:d.score+"%",background:d.color,borderRadius:3,transition:"width 0.5s ease"}}/>
-                          </div>
-                          <span style={{fontSize:12,fontWeight:800,fontFamily:"'DM Mono',monospace",color:d.color,width:28,textAlign:"right"}}>{d.score}</span>
-                          <span style={{fontSize:11,fontWeight:700,color:isAlert?d.color:"#374151",width:72,flexShrink:0,textAlign:"right"}}>{d.label}</span>
-                        </div>
-                        <div style={{display:"flex",gap:12,marginBottom:6,flexWrap:"wrap"}}>
-                          {chips.map(([l,v])=>(
-                            <div key={l}>
-                              <div style={{fontSize:8,color:"#9ca3af",textTransform:"uppercase",fontWeight:700,letterSpacing:"0.05em",marginBottom:1}}>{l}</div>
-                              <div style={{fontSize:11,fontWeight:700,fontFamily:"'DM Mono',monospace",color:"#374151"}}>{v}</div>
-                            </div>
-                          ))}
-                        </div>
-                        <div style={{fontSize:10,color:"#6b7280",fontStyle:"italic",lineHeight:1.4,borderLeft:`2px solid ${d.color}30`,paddingLeft:8}}>{diag}</div>
+                  {/* Survival pillar bar */}
+                  <div style={{padding:"12px 16px",borderBottom:"1px solid #f3f4f6"}}>
+                    <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:6}}>
+                      <div style={{flex:1,height:6,background:"#f3f4f6",borderRadius:3,overflow:"hidden"}}>
+                        <div style={{height:"100%",width:survival.score+"%",background:survival.color,borderRadius:3,transition:"width 0.4s ease"}}/>
                       </div>
-                    );
-                  })}
-                </div>
-
-                {/* ── PANEL 2: STRESS & SCENARIOS (Risk + Scenario merged) ── */}
-                <div style={{background:"white",borderRadius:12,border:"1.5px solid #f0f0f0",overflow:"hidden",boxShadow:"0 1px 4px rgba(0,0,0,0.04)"}}>
-                  <div style={{padding:"10px 16px",borderBottom:"1px solid #f3f4f6",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-                    <span style={{fontSize:10,fontWeight:700,color:"#374151",textTransform:"uppercase",letterSpacing:"0.07em"}}>Stress & Scenarios</span>
-                    <div style={{display:"flex",alignItems:"center",gap:6}}>
-                      <span style={{fontSize:16,fontWeight:900,fontFamily:"'DM Mono',monospace",color:risk.survivalProb>=80?"#059669":risk.survivalProb>=60?"#d97706":"#dc2626"}}>{risk.survivalProb}%</span>
-                      <span style={{fontSize:9,color:"#9ca3af",lineHeight:1.3}}>scenarios<br/>survived</span>
+                      <span style={{fontSize:12,fontWeight:800,color:survival.color,fontFamily:"'DM Mono',monospace",width:28}}>{survival.score}</span>
+                      <span style={{fontSize:11,fontWeight:700,color:survival.color,width:64,flexShrink:0}}>{survival.label}</span>
+                    </div>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:8,marginBottom:8}}>
+                      {[["DSCR",c.dscr.toFixed(2)+"x"],["Break-even",(c.beo*100).toFixed(1)+"%"],["Refi DSCR",survival.refiDSCR+"x"],["Refi Risk",survival.refiVuln]].map(([l,v])=>(
+                        <div key={l}>
+                          <div style={{fontSize:8,color:"#9ca3af",textTransform:"uppercase",fontWeight:700,marginBottom:1}}>{l}</div>
+                          <div style={{fontSize:11,fontWeight:700,fontFamily:"'DM Mono',monospace",color:"#374151"}}>{v}</div>
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{fontSize:10,color:"#6b7280",fontStyle:"italic",lineHeight:1.4,borderLeft:`2px solid ${survival.color}40`,paddingLeft:8}}>
+                      {survival.isFail?"Structural failure — debt service cannot be met at current terms.":
+                       survival.label==="Critical"?"Near-zero margin. One stress event eliminates coverage.":
+                       survival.label==="Fragile"?"Coverage fragile — one vacancy event tests break-even.":
+                       survival.label==="Stable"?"Coverage adequate. Stress margin limited but present.":
+                       "Debt well covered. Healthy vacancy buffer."}
                     </div>
                   </div>
                   {/* Stress tabs */}
                   <div style={{display:"flex",borderBottom:"1px solid #f3f4f6"}}>
                     {["vacancy","interest","rent","expense"].map(t=>(
                       <button key={t} onClick={()=>setStressTab(t)}
-                        style={{flex:1,padding:"7px",border:"none",background:stressTab===t?"#f9fafb":"white",borderBottom:stressTab===t?"2px solid #374151":"2px solid transparent",fontSize:9,fontWeight:700,color:stressTab===t?"#111827":"#9ca3af",cursor:"pointer",textTransform:"capitalize",transition:"all 0.1s"}}>
+                        style={{flex:1,padding:"6px",border:"none",background:stressTab===t?"#f9fafb":"white",borderBottom:stressTab===t?"2px solid #374151":"2px solid transparent",fontSize:9,fontWeight:700,color:stressTab===t?"#111827":"#9ca3af",cursor:"pointer",textTransform:"capitalize"}}>
                         {t}
                       </button>
                     ))}
                   </div>
                   <div style={{padding:"10px 16px"}}>
-                    <div style={{fontSize:9,color:"#9ca3af",marginBottom:8,fontStyle:"italic"}}>
+                    <div style={{fontSize:9,color:"#9ca3af",marginBottom:7,fontStyle:"italic"}}>
                       {stressTab==="vacancy"?"Simulating 1–3 months vacancy per year":
                        stressTab==="interest"?"Simulating rate increase at refinance":
-                       stressTab==="rent"?"Simulating rent compression from market softening":
-                       "Simulating expense inflation over hold period"}
+                       stressTab==="rent"?"Simulating rent compression":
+                       "Simulating expense inflation"}
                     </div>
                     {risk.scenarios.filter(s=>s.cat===stressTab).map((s,si,arr)=>(
-                      <div key={si} style={{display:"flex",alignItems:"center",gap:10,padding:"5px 0",borderBottom:si<arr.length-1?"1px solid #f9fafb":"none"}}>
-                        <span style={{fontSize:11,color:"#6b7280",width:90,flexShrink:0}}>{s.label}</span>
+                      <div key={si} style={{display:"flex",alignItems:"center",gap:8,padding:"5px 0",borderBottom:si<arr.length-1?"1px solid #f9fafb":"none"}}>
+                        <span style={{fontSize:10,color:"#6b7280",width:88,flexShrink:0}}>{s.label}</span>
                         <div style={{flex:1,height:4,background:"#f3f4f6",borderRadius:2,overflow:"hidden"}}>
                           <div style={{height:"100%",width:Math.max(0,Math.min(100,(s.dscr/2)*100))+"%",background:s.breaches?"#dc2626":"#059669",borderRadius:2}}/>
                         </div>
-                        <span style={{fontSize:11,fontWeight:700,fontFamily:"'DM Mono',monospace",color:s.breaches?"#dc2626":"#374151",width:38,textAlign:"right"}}>{s.dscr.toFixed(2)}x</span>
-                        <span style={{fontSize:11,fontFamily:"'DM Mono',monospace",color:s.cf>=0?"#059669":"#dc2626",width:68,textAlign:"right"}}>{fmtD(s.cf)}/mo</span>
+                        <span style={{fontSize:11,fontWeight:700,fontFamily:"'DM Mono',monospace",color:s.breaches?"#dc2626":"#374151",width:36,textAlign:"right"}}>{s.dscr.toFixed(2)}x</span>
+                        <span style={{fontSize:11,fontFamily:"'DM Mono',monospace",color:s.cf>=0?"#059669":"#dc2626",width:65,textAlign:"right"}}>{fmtD(s.cf)}/mo</span>
                         {s.breaches&&<span style={{fontSize:8,color:"#dc2626",background:"#fef2f2",padding:"1px 4px",borderRadius:100,fontWeight:700,flexShrink:0}}>BREACH</span>}
                       </div>
                     ))}
                   </div>
-                  {/* Scenario range */}
-                  <div style={{borderTop:"1px solid #f3f4f6",padding:"10px 16px"}}>
-                    <div style={{fontSize:9,color:"#9ca3af",textTransform:"uppercase",fontWeight:700,letterSpacing:"0.06em",marginBottom:8}}>5-Year Outcome Range</div>
-                    <div style={{display:"flex",gap:6}}>
-                      {scenarios.map((sc,si)=>(
-                        <div key={si} onClick={()=>setScenTab(si)}
-                          style={{flex:1,padding:"8px 6px",borderRadius:8,border:`1.5px solid ${scenTab===si?sc.color:"#f0f0f0"}`,background:scenTab===si?sc.color+"10":"#fafafa",cursor:"pointer",textAlign:"center",transition:"all 0.12s"}}>
-                          <div style={{fontSize:8,fontWeight:700,color:sc.color,textTransform:"uppercase",marginBottom:2}}>{sc.label}</div>
-                          <div style={{fontSize:11,fontWeight:800,fontFamily:"'DM Mono',monospace",color:"#374151"}}>{fmtD(sc.eq5)}</div>
-                          <div style={{fontSize:8,color:"#9ca3af"}}>equity</div>
-                          <div style={{fontSize:9,fontFamily:"'DM Mono',monospace",color:sc.cumCF>=0?"#059669":"#dc2626",fontWeight:700,marginTop:2}}>{fmtD(sc.cumCF)} CF</div>
-                          <div style={{fontSize:8,color:sc.refiViable?"#059669":"#9ca3af",marginTop:1}}>{sc.refiViable?"✅ Refi":"⚠️ Refi"}</div>
-                        </div>
-                      ))}
-                    </div>
-                    {monte&&(
-                      <div style={{display:"flex",gap:14,marginTop:10,padding:"8px 10px",background:"#f9fafb",borderRadius:8}}>
-                        {[["P(Neg CF)",monte.pNegCF+"%"],["P(DSCR<1)",monte.pDSCR+"%"],["Median CF",fmtD(monte.median)+"/mo"],["Worst 10%",fmtD(monte.worst10)+"/mo"]].map(([l,v])=>(
-                          <div key={l}>
-                            <div style={{fontSize:8,color:"#9ca3af",textTransform:"uppercase",fontWeight:700,marginBottom:1}}>{l}</div>
-                            <div style={{fontSize:11,fontWeight:700,fontFamily:"'DM Mono',monospace",color:"#374151"}}>{v}</div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
                 </div>
 
-                {/* ── PANEL 3: CAPITAL RECOVERY (Optimization + Liquidity merged) ── */}
-                <div style={{background:"white",borderRadius:12,border:"1.5px solid #f0f0f0",overflow:"hidden",boxShadow:"0 1px 4px rgba(0,0,0,0.04)"}}>
-                  <div style={{padding:"10px 16px",borderBottom:"1px solid #f3f4f6",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                {/* 3. CAPITAL RECOVERY */}
+                <div style={{background:"white",borderRadius:12,border:"1.5px solid #f0f0f0",overflow:"hidden",boxShadow:"0 1px 3px rgba(0,0,0,0.04)"}}>
+                  <div style={{padding:"10px 16px",borderBottom:"1px solid #f3f4f6",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                     <span style={{fontSize:10,fontWeight:700,color:"#374151",textTransform:"uppercase",letterSpacing:"0.07em"}}>Capital Recovery</span>
-                    <div style={{display:"flex",alignItems:"center",gap:6}}>
-                      <span style={{fontSize:16,fontWeight:900,fontFamily:"'DM Mono',monospace",color:capRecovery.color}}>{capRecovery.score}</span>
-                      <span style={{fontSize:10,fontWeight:700,color:capRecovery.color,background:capRecovery.color+"15",padding:"2px 8px",borderRadius:100}}>{capRecovery.label}</span>
-                    </div>
+                    <span style={{fontSize:10,fontWeight:700,color:capRecovery.color,background:capRecovery.color+"15",padding:"2px 8px",borderRadius:100}}>{capRecovery.label}</span>
                   </div>
-                  {/* Recovery metrics row */}
                   <div style={{padding:"12px 16px",borderBottom:"1px solid #f3f4f6"}}>
-                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:8}}>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:8,marginBottom:10}}>
                       {[
-                        ["Capital In",      fmtD(c.ti),                   "#374151"],
-                        ["Recover In",      liq?.yearsToRecover?liq.yearsToRecover+" yrs":"Long", capRecovery.color],
-                        ["5yr Equity",      fmtD(capital.eq5),             "#059669"],
-                        ["Refi (Base)",     scenarios[1]?.refiViable?"✅ Viable":"⚠️ Uncertain", scenarios[1]?.refiViable?"#059669":"#d97706"],
+                        ["Capital In",     fmtD(c.ti),       "#374151"],
+                        ["Recover In",     liq?.yearsToRecover?liq.yearsToRecover+" yrs":"Long", capRecovery.color],
+                        ["5yr Equity",     fmtD(capital.eq5),"#059669"],
+                        ["Refi Viable",    scenarios[1]?.refiViable?"Yes":"Uncertain", scenarios[1]?.refiViable?"#059669":"#d97706"],
                       ].map(([l,v,col])=>(
                         <div key={l} style={{background:"#f9fafb",borderRadius:8,padding:"8px 10px",textAlign:"center"}}>
                           <div style={{fontSize:8,color:"#9ca3af",textTransform:"uppercase",fontWeight:700,marginBottom:3}}>{l}</div>
-                          <div style={{fontSize:13,fontWeight:800,fontFamily:"'DM Mono',monospace",color:col,lineHeight:1}}>{v}</div>
+                          <div style={{fontSize:12,fontWeight:800,fontFamily:"'DM Mono',monospace",color:col,lineHeight:1}}>{v}</div>
                         </div>
                       ))}
                     </div>
-                    {liq&&<p style={{fontSize:10,color:liq.riskColor,background:liq.riskColor+"10",padding:"6px 10px",borderRadius:6,margin:"10px 0 0",fontWeight:600,lineHeight:1.4}}>{liq.riskReason}</p>}
+                    {/* Capital multiplier timeline */}
+                    <div style={{background:"#f9fafb",borderRadius:8,padding:"10px 12px"}}>
+                      <div style={{fontSize:9,color:"#9ca3af",textTransform:"uppercase",fontWeight:700,marginBottom:8,letterSpacing:"0.06em"}}>Capital Multiplier</div>
+                      <div style={{display:"flex",gap:0}}>
+                        {[["Yr 5",capital.equityMultiple+"x"],["Yr 10",(capital.em10||0)+"x"],["Yr 20",(capital.em20||0)+"x"]].map(([yr,mult],ci)=>(
+                          <div key={yr} style={{flex:1,textAlign:"center",borderRight:ci<2?"1px solid #e5e7eb":"none",padding:"0 8px"}}>
+                            <div style={{fontSize:8,color:"#9ca3af",marginBottom:3}}>{yr}</div>
+                            <div style={{fontSize:15,fontWeight:900,fontFamily:"'DM Mono',monospace",color:"#059669"}}>{mult}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    {liq&&<div style={{fontSize:10,color:liq.riskColor,background:liq.riskColor+"10",padding:"6px 10px",borderRadius:6,marginTop:8,fontWeight:600,lineHeight:1.4}}>{liq.riskReason}</div>}
                   </div>
-                  {/* Optimization solver */}
-                  <div style={{padding:"12px 16px",background:"#f9fdfb",borderBottom:"1px solid #f0f0f0"}}>
-                    <div style={{fontSize:9,fontWeight:700,color:"#065f46",textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:10}}>🎯 Fix-The-Deal Solver</div>
+                </div>
+
+                {/* 4. INCOME STRENGTH */}
+                <div style={{background:"white",borderRadius:12,border:"1.5px solid #f0f0f0",overflow:"hidden",boxShadow:"0 1px 3px rgba(0,0,0,0.04)"}}>
+                  <div style={{padding:"10px 16px",borderBottom:"1px solid #f3f4f6",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <span style={{fontSize:10,fontWeight:700,color:"#374151",textTransform:"uppercase",letterSpacing:"0.07em"}}>Income Strength</span>
+                    <div style={{display:"flex",alignItems:"center",gap:6}}>
+                      <div style={{width:60,height:4,background:"#f3f4f6",borderRadius:2,overflow:"hidden"}}>
+                        <div style={{height:"100%",width:income.score+"%",background:income.color,borderRadius:2}}/>
+                      </div>
+                      <span style={{fontSize:11,fontWeight:700,color:income.color}}>{income.score}</span>
+                    </div>
+                  </div>
+                  <div style={{padding:"12px 16px"}}>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
+                      {[["Monthly CF",fmtD(c.mcf)+"/mo"],["CoC",fmtP(c.coc)],["5yr CF",fmtD(income.cum5)],["Durability",income.durGrade]].map(([l,v])=>(
+                        <div key={l} style={{background:"#f9fafb",borderRadius:7,padding:"8px 10px"}}>
+                          <div style={{fontSize:8,color:"#9ca3af",textTransform:"uppercase",fontWeight:700,marginBottom:2}}>{l}</div>
+                          <div style={{fontSize:12,fontWeight:700,fontFamily:"'DM Mono',monospace",color:"#374151"}}>{v}</div>
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{fontSize:10,color:"#6b7280",fontStyle:"italic",lineHeight:1.4,borderLeft:`2px solid ${income.color}40`,paddingLeft:8}}>
+                      {income.label==="Weak"?"Property does not produce distributable income at current inputs.":
+                       income.label==="Moderate"?"Pays modestly — below benchmark but positive carry.":
+                       "Above-benchmark cash flow. Income is real and durable."}
+                    </div>
+                  </div>
+                </div>
+
+                {/* 5. FIX-THE-DEAL SOLVER */}
+                <div style={{background:"white",borderRadius:12,border:"1.5px solid #bbf7d0",overflow:"hidden",boxShadow:"0 1px 3px rgba(0,0,0,0.04)"}}>
+                  <div style={{padding:"10px 16px",background:"#f0fdf4",borderBottom:"1px solid #d1fae5"}}>
+                    <span style={{fontSize:10,fontWeight:700,color:"#065f46",textTransform:"uppercase",letterSpacing:"0.07em"}}>🎯 Fix-The-Deal Solver</span>
+                  </div>
+                  <div style={{padding:"12px 16px"}}>
                     <OSlider label="Purchase Price" value={pp} onChange={v=>setOptPP(v)} min={Math.round((+i.pp||320000)*0.55)} max={Math.round((+i.pp||320000)*1.2)} step={5000} display={v=>`$${Math.round(v/1000)}K`}/>
                     <OSlider label="Monthly Rent"   value={optRentVal} onChange={v=>setOptRent(v)} min={Math.round((+i.rent||2800)*0.65)} max={Math.round((+i.rent||2800)*1.5)} step={50} display={v=>`$${v.toLocaleString()}/mo`}/>
                     <OSlider label="Down Payment"   value={down} onChange={v=>setOptDown(v)} min={5} max={50} step={1} display={v=>`${v}%`}/>
@@ -2025,83 +2045,250 @@ function RentalCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro,al
                     {optSteps.length===0?(
                       <div style={{padding:"10px",background:"#f0fdf4",borderRadius:8,textAlign:"center",fontSize:12,color:"#059669",fontWeight:700}}>✅ Already meets {optTarget}</div>
                     ):(
-                      <div style={{background:"white",borderRadius:10,border:"1px solid #e5e7eb",padding:"10px"}}>
+                      <div style={{background:"#f9fafb",borderRadius:10,border:"1px solid #e5e7eb",padding:"10px"}}>
                         <div style={{fontSize:10,fontWeight:700,color:"#374151",marginBottom:8}}>To reach <strong>{optTarget}</strong>:</div>
-                        {optSteps.map((opt,oi)=>(
-                          <div key={oi} style={{display:"flex",alignItems:"center",gap:10,padding:"7px 0",borderBottom:oi<optSteps.length-1?"1px solid #f3f4f6":"none"}}>
-                            <span style={{fontSize:13,flexShrink:0}}>{opt.icon}</span>
-                            <div style={{flex:1}}>
-                              <div style={{fontSize:11,color:"#374151",fontWeight:600}}>{opt.label}</div>
-                              <div style={{display:"flex",alignItems:"center",gap:8}}>
-                                <span style={{fontSize:14,fontWeight:800,fontFamily:"'DM Mono',monospace",color:"#059669"}}>{opt.value}</span>
-                                <span style={{fontSize:11,color:"#9ca3af",fontFamily:"'DM Mono',monospace"}}>{opt.delta}</span>
-                                {opt.feasible===false&&<span style={{fontSize:9,color:"#dc2626",background:"#fef2f2",padding:"1px 5px",borderRadius:100,fontWeight:700}}>Hard</span>}
+                        {optSteps.map((opt,oi)=>{
+                          const pct=Math.abs(parseFloat(opt.delta||"0"));
+                          const diff=pct<10?"Easy":pct<20?"Moderate":"Hard";
+                          const dc=diff==="Easy"?"#059669":diff==="Moderate"?"#d97706":"#dc2626";
+                          return(
+                            <div key={oi} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 0",borderBottom:oi<optSteps.length-1?"1px solid #f3f4f6":"none"}}>
+                              <span style={{fontSize:13,flexShrink:0}}>{opt.icon}</span>
+                              <div style={{flex:1}}>
+                                <div style={{fontSize:11,color:"#374151",fontWeight:600}}>{opt.label}</div>
+                                <div style={{display:"flex",alignItems:"center",gap:6}}>
+                                  <span style={{fontSize:13,fontWeight:800,fontFamily:"'DM Mono',monospace",color:"#059669"}}>{opt.value}</span>
+                                  <span style={{fontSize:10,color:"#9ca3af",fontFamily:"'DM Mono',monospace"}}>{opt.delta}</span>
+                                  <span style={{fontSize:9,fontWeight:700,color:dc,background:dc+"15",padding:"1px 5px",borderRadius:100}}>{diff}</span>
+                                </div>
                               </div>
                             </div>
-                            {oi===0&&<span style={{fontSize:9,color:"#059669",background:"#f0fdf4",padding:"2px 7px",borderRadius:100,fontWeight:700,flexShrink:0}}>Easiest</span>}
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     )}
                   </div>
                 </div>
 
-                {/* ── PORTFOLIO IMPACT (only if other deals exist) ── */}
-                {portImpact&&portImpact.dealCount>0&&(
-                  <div style={{background:"white",borderRadius:12,border:"1.5px solid #f0f0f0",overflow:"hidden",boxShadow:"0 1px 4px rgba(0,0,0,0.04)"}}>
-                    <div style={{padding:"10px 16px",borderBottom:"1px solid #f3f4f6"}}>
-                      <span style={{fontSize:10,fontWeight:700,color:"#374151",textTransform:"uppercase",letterSpacing:"0.07em"}}>Portfolio Impact</span>
+                {/* 6. LIQUIDITY */}
+                {liq&&(
+                  <div style={{background:"white",borderRadius:12,border:"1.5px solid #e5e7eb",overflow:"hidden",boxShadow:"0 1px 3px rgba(0,0,0,0.04)"}}>
+                    <div style={{padding:"10px 16px",borderBottom:"1px solid #f3f4f6",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                      <span style={{fontSize:10,fontWeight:700,color:"#374151",textTransform:"uppercase",letterSpacing:"0.07em"}}>💧 Liquidity</span>
+                      <span style={{fontSize:10,fontWeight:700,color:liq.riskColor,background:liq.riskColor+"15",padding:"2px 8px",borderRadius:100}}>{liq.riskLevel}</span>
                     </div>
-                    <div style={{padding:"12px 16px",display:"flex",flexDirection:"column",gap:6}}>
-                      {portImpact.portDSCR_before!=null&&(
-                        <div style={{display:"flex",alignItems:"center",gap:8,padding:"6px 10px",background:"#f9fafb",borderRadius:8}}>
-                          <span style={{fontSize:11}}>{portImpact.portDSCR_after<portImpact.portDSCR_before?"📉":"📈"}</span>
-                          <span style={{fontSize:11,color:"#374151"}}>Portfolio DSCR: <strong>{portImpact.portDSCR_before}x</strong> → <strong style={{color:portImpact.portDSCR_after<portImpact.portDSCR_before?"#dc2626":"#059669"}}>{portImpact.portDSCR_after}x</strong></span>
-                        </div>
-                      )}
-                      <div style={{display:"flex",alignItems:"center",gap:8,padding:"6px 10px",background:"#f9fafb",borderRadius:8}}>
-                        <span style={{fontSize:11}}>{portImpact.portMCF_after>portImpact.portMCF_before?"📈":"📉"}</span>
-                        <span style={{fontSize:11,color:"#374151"}}>Cash flow: <strong>{fmtD(portImpact.portMCF_before)}</strong> → <strong style={{color:portImpact.portMCF_after>portImpact.portMCF_before?"#059669":"#dc2626"}}>{fmtD(portImpact.portMCF_after)}/mo</strong></span>
+                    <div style={{padding:"12px 16px"}}>
+                      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
+                        {[["Capital Required",fmtD(liq.capitalRequired)],["Annual CF",fmtD(liq.annualCF)],["Recovery Time",liq.yearsToRecover?liq.yearsToRecover+" yrs":"Never"],["Buffer Needed",RISK_CONFIG[riskTol].liquidityMos+" mo"]].map(([l,v])=>(
+                          <div key={l} style={{background:"#f9fafb",borderRadius:7,padding:"8px 10px"}}>
+                            <div style={{fontSize:8,color:"#9ca3af",textTransform:"uppercase",fontWeight:700,marginBottom:2}}>{l}</div>
+                            <div style={{fontSize:12,fontWeight:700,fontFamily:"'DM Mono',monospace",color:"#374151"}}>{v}</div>
+                          </div>
+                        ))}
                       </div>
-                      {portImpact.liqMos_before!=null&&(
-                        <div style={{display:"flex",alignItems:"center",gap:8,padding:"6px 10px",background:"#f9fafb",borderRadius:8}}>
-                          <span style={{fontSize:11}}>{portImpact.liqMos_after<portImpact.liqMos_before?"⚠️":"✅"}</span>
-                          <span style={{fontSize:11,color:"#374151"}}>Liquidity: <strong>{portImpact.liqMos_before.toFixed(1)} mo</strong> → <strong style={{color:portImpact.liqMos_after<RISK_CONFIG[riskTol].liquidityMos?"#dc2626":"#059669"}}>{portImpact.liqMos_after?.toFixed(1)} mo</strong></span>
-                        </div>
-                      )}
+                      <div style={{fontSize:10,color:"#6b7280",lineHeight:1.5}}>
+                        {`Requires ${RISK_CONFIG[riskTol].liquidityMos}-month liquidity buffer under ${riskTol} stress scenario.`}
+                      </div>
                     </div>
                   </div>
                 )}
-              </>
+
+                {/* Portfolio impact — only if other deals */}
+                {portImpact&&portImpact.dealCount>0&&(
+                  <div style={{background:"white",borderRadius:12,border:"1.5px solid #f0f0f0",overflow:"hidden"}}>
+                    <div style={{padding:"10px 16px",borderBottom:"1px solid #f3f4f6"}}>
+                      <span style={{fontSize:10,fontWeight:700,color:"#374151",textTransform:"uppercase",letterSpacing:"0.07em"}}>Portfolio Impact</span>
+                    </div>
+                    <div style={{padding:"12px 16px",display:"flex",flexDirection:"column",gap:5}}>
+                      {portImpact.portDSCR_before!=null&&(
+                        <div style={{display:"flex",alignItems:"center",gap:8,padding:"5px 8px",background:"#f9fafb",borderRadius:7}}>
+                          <span style={{fontSize:10}}>{portImpact.portDSCR_after<portImpact.portDSCR_before?"📉":"📈"}</span>
+                          <span style={{fontSize:11,color:"#374151"}}>DSCR: <b>{portImpact.portDSCR_before}x</b> → <b style={{color:portImpact.portDSCR_after<portImpact.portDSCR_before?"#dc2626":"#059669"}}>{portImpact.portDSCR_after}x</b></span>
+                        </div>
+                      )}
+                      <div style={{display:"flex",alignItems:"center",gap:8,padding:"5px 8px",background:"#f9fafb",borderRadius:7}}>
+                        <span style={{fontSize:10}}>{portImpact.portMCF_after>portImpact.portMCF_before?"📈":"📉"}</span>
+                        <span style={{fontSize:11,color:"#374151"}}>Cash flow: <b>{fmtD(portImpact.portMCF_before)}</b> → <b style={{color:portImpact.portMCF_after>portImpact.portMCF_before?"#059669":"#dc2626"}}>{fmtD(portImpact.portMCF_after)}/mo</b></span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
             </ProGate>
           )}
 
           {/* ════ PROJECTION MODE ════ */}
-          {viewMode==="projection"&&(
-            <div style={{display:"flex",flexDirection:"column",gap:14}}>
-              <div style={{background:"white",borderRadius:12,border:"1.5px solid #e5e7eb",padding:"16px",boxShadow:"0 1px 4px rgba(0,0,0,0.05)"}}>
-                <div style={{fontSize:10,fontWeight:700,color:"#9ca3af",textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:12}}>📊 Hold Projection</div>
-                <LineChart data={cfChartData} color="#059669" height={100}/>
-                <div style={{marginTop:12}}>
-                  <table style={{width:"100%",borderCollapse:"collapse"}}>
-                    <thead><tr style={{borderBottom:"2px solid #f3f4f6"}}>
-                      {["Year","Rent","Value","Equity","Mo. CF"].map(h=><th key={h} style={{padding:"7px 8px",textAlign:h==="Year"?"left":"right",fontSize:10,fontWeight:700,color:"#9ca3af",textTransform:"uppercase",letterSpacing:"0.05em"}}>{h}</th>)}
-                    </tr></thead>
-                    <tbody>
-                      {c.proj.map((p,pi)=>(
-                        <tr key={p.yr} style={{borderBottom:"1px solid #f9fafb",background:pi%2===0?"white":"#fafafa"}}>
-                          <td style={{padding:"7px 8px",fontSize:11,color:"#374151",fontWeight:600}}>Year {p.yr}</td>
-                          <td style={{padding:"7px 10px",textAlign:"right",fontFamily:"'DM Mono',monospace",color:"#374151",fontSize:11}}>{fmtD(p.rent)}/mo</td>
-                          <td style={{padding:"7px 10px",textAlign:"right",fontFamily:"'DM Mono',monospace",color:"#374151",fontSize:11}}>{fmtM(p.val)}</td>
-                          <td style={{padding:"7px 10px",textAlign:"right",fontFamily:"'DM Mono',monospace",color:"#059669",fontSize:11}}>{fmtM(p.equity)}</td>
-                          <td style={{padding:"7px 10px",textAlign:"right",fontFamily:"'DM Mono',monospace",color:p.mcf>=0?"#059669":"#dc2626",fontWeight:700}}>{fmtD(p.mcf)}</td>
-                        </tr>
-                      ))}</tbody>
-                  </table>
+          {viewMode==="projection"&&(()=>{
+            // Build 3 scenarios for projection
+            const appR  = +i.appreciation||3;
+            const rentG = +i.rentGrowth||2;
+            const expG  = +i.expenseGrowth||2;
+            const scenarios3 = [
+              {label:"Base",         app:appR,     rent:rentG,  exp:expG,    color:"#059669"},
+              {label:"Conservative", app:appR-1.5, rent:rentG-1,exp:expG+1,  color:"#2563eb"},
+              {label:"Stress",       app:-2,       rent:-1,     exp:expG+2,  color:"#dc2626"},
+            ];
+            const years30 = [1,3,5,7,10,15,20,25,30];
+            const loan0 = c.loan;
+
+            const buildRows = (sc) => years30.map(yr=>{
+              const val   = (c.effPP||0)*Math.pow(1+sc.app/100,yr);
+              const bal   = loanBalance(loan0,+i.rate,+i.term,yr);
+              const eq    = Math.max(0,val-bal);
+              const rentY = (c.effRent||0)*Math.pow(1+sc.rent/100,yr);
+              const expY  = totalExp*Math.pow(1+sc.exp/100,yr);
+              const mcfY  = rentY - expY - mort;
+              const cumCF = yr * ((c.effRent||0)+rentY)/2*12 - totalExp*12*yr - mort*12*yr;
+              const mult  = (c.ti||1)>0 ? +((eq + Math.max(0,cumCF))/c.ti).toFixed(1) : 0;
+              return {yr,val:Math.round(val),bal:Math.round(bal),eq:Math.round(eq),mcfY:Math.round(mcfY),mult};
+            });
+
+            const rows = buildRows(scenarios3[0]);
+            const rowsC= buildRows(scenarios3[1]);
+            const rowsS= buildRows(scenarios3[2]);
+
+            // Chart: equity/value lines across years
+            const maxVal = Math.max(...rows.map(r=>r.val),1);
+            const W=300, H=110, padX=4, padY=8;
+            const xS = i=>padX+(i/(years30.length-1))*(W-padX*2);
+            const yS = v=>H-padY-((v/maxVal)*(H-padY*2));
+            const mkPath = arr => arr.map((r,i)=>`${i===0?"M":"L"}${xS(i)},${yS(r)}`).join(" ");
+            const eqPath = mkPath(rows.map(r=>r.eq));
+            const valPath= mkPath(rows.map(r=>r.val));
+            const balPath= mkPath(rows.map(r=>r.bal));
+            const eqPathC= mkPath(rowsC.map(r=>r.eq));
+            const eqPathS= mkPath(rowsS.map(r=>r.eq));
+
+            return (
+              <div style={{display:"flex",flexDirection:"column",gap:14}}>
+
+                {/* 30-Year Wealth Curve */}
+                <div style={{background:"white",borderRadius:12,border:"1.5px solid #e5e7eb",overflow:"hidden",boxShadow:"0 1px 4px rgba(0,0,0,0.05)"}}>
+                  <div style={{padding:"12px 16px",borderBottom:"1px solid #f3f4f6",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <span style={{fontSize:10,fontWeight:700,color:"#374151",textTransform:"uppercase",letterSpacing:"0.07em"}}>30-Year Wealth Curve</span>
+                    <div style={{display:"flex",gap:10}}>
+                      {[["Equity","#059669"],["Value","#94a3b8"],["Loan","#e5e7eb"]].map(([l,c])=>(
+                        <div key={l} style={{display:"flex",alignItems:"center",gap:4}}>
+                          <div style={{width:16,height:2,background:c,borderRadius:1}}/>
+                          <span style={{fontSize:8,color:"#9ca3af"}}>{l}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div style={{padding:"12px 16px"}}>
+                    <svg viewBox={`0 0 ${W} ${H}`} style={{width:"100%",height:H,overflow:"visible",display:"block"}}>
+                      {/* Grid */}
+                      {[0.25,0.5,0.75].map(f=>(
+                        <line key={f} x1={padX} y1={yS(maxVal*f)} x2={W-padX} y2={yS(maxVal*f)} stroke="#f3f4f6" strokeWidth="1"/>
+                      ))}
+                      {/* Conservative equity dashed */}
+                      <path d={eqPathC} fill="none" stroke="#2563eb" strokeWidth="1.5" strokeDasharray="4,3" opacity="0.5"/>
+                      {/* Stress equity dashed */}
+                      <path d={eqPathS} fill="none" stroke="#dc2626" strokeWidth="1.5" strokeDasharray="4,3" opacity="0.5"/>
+                      {/* Loan balance */}
+                      <path d={balPath} fill="none" stroke="#e5e7eb" strokeWidth="1.5"/>
+                      {/* Property value */}
+                      <path d={valPath} fill="none" stroke="#94a3b8" strokeWidth="1.5"/>
+                      {/* Base equity — bold */}
+                      <path d={eqPath}  fill="none" stroke="#059669" strokeWidth="2.5" strokeLinecap="round"/>
+                      {/* Year labels */}
+                      {rows.map((r,idx)=>idx%2===0&&(
+                        <text key={r.yr} x={xS(idx)} y={H+2} textAnchor="middle" fontSize="7" fill="#9ca3af">Y{r.yr}</text>
+                      ))}
+                    </svg>
+                    <div style={{display:"flex",gap:8,marginTop:4}}>
+                      {scenarios3.map(sc=>(
+                        <div key={sc.label} style={{display:"flex",alignItems:"center",gap:4}}>
+                          <div style={{width:12,height:2,background:sc.color,borderRadius:1,opacity:sc.label==="Base"?1:0.6}}/>
+                          <span style={{fontSize:8,color:"#9ca3af"}}>{sc.label} equity</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 </div>
+
+                {/* Capital Multiplier Timeline */}
+                <div style={{background:"white",borderRadius:12,border:"1.5px solid #e5e7eb",overflow:"hidden",boxShadow:"0 1px 4px rgba(0,0,0,0.05)"}}>
+                  <div style={{padding:"12px 16px",borderBottom:"1px solid #f3f4f6"}}>
+                    <span style={{fontSize:10,fontWeight:700,color:"#374151",textTransform:"uppercase",letterSpacing:"0.07em"}}>Capital Multiplier Timeline</span>
+                  </div>
+                  <div style={{padding:"12px 16px"}}>
+                    <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:6}}>
+                      {[5,10,15,20,30].map(yr=>{
+                        const r = rows.find(x=>x.yr===yr);
+                        const rC= rowsC.find(x=>x.yr===yr);
+                        if(!r) return null;
+                        const isGood = r.mult>=1.5;
+                        return(
+                          <div key={yr} style={{textAlign:"center",background:"#f9fafb",borderRadius:8,padding:"10px 6px"}}>
+                            <div style={{fontSize:8,color:"#9ca3af",marginBottom:4}}>Year {yr}</div>
+                            <div style={{fontSize:18,fontWeight:900,fontFamily:"'DM Mono',monospace",color:isGood?"#059669":"#d97706",lineHeight:1}}>{r.mult}×</div>
+                            <div style={{fontSize:8,color:"#9ca3af",marginTop:3}}>conservative</div>
+                            <div style={{fontSize:11,fontWeight:700,fontFamily:"'DM Mono',monospace",color:"#6b7280"}}>{rC?.mult||"—"}×</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Refi Windows */}
+                <div style={{background:"white",borderRadius:12,border:"1.5px solid #e5e7eb",overflow:"hidden",boxShadow:"0 1px 4px rgba(0,0,0,0.05)"}}>
+                  <div style={{padding:"12px 16px",borderBottom:"1px solid #f3f4f6"}}>
+                    <span style={{fontSize:10,fontWeight:700,color:"#374151",textTransform:"uppercase",letterSpacing:"0.07em"}}>Refi Windows</span>
+                  </div>
+                  <div style={{padding:"12px 16px"}}>
+                    <div style={{display:"flex",gap:6,marginBottom:10}}>
+                      {[3,5,7,10].map(yr=>{
+                        const r = rows.find(x=>x.yr===yr)||rows[0];
+                        const eqPct = c.effPP>0 ? r.eq/c.effPP : 0;
+                        const viable = eqPct>=0.20&&survival.score>=55;
+                        return(
+                          <div key={yr} style={{flex:1,textAlign:"center",padding:"8px 4px",borderRadius:8,border:`1.5px solid ${viable?"#bbf7d0":"#f0f0f0"}`,background:viable?"#f0fdf4":"#fafafa"}}>
+                            <div style={{fontSize:9,fontWeight:700,color:viable?"#059669":"#9ca3af",marginBottom:3}}>Year {yr}</div>
+                            <div style={{fontSize:10,fontWeight:700,fontFamily:"'DM Mono',monospace",color:"#374151"}}>{(eqPct*100).toFixed(0)}%</div>
+                            <div style={{fontSize:8,color:"#9ca3af",marginBottom:2}}>equity</div>
+                            <div style={{fontSize:9,fontWeight:700,color:viable?"#059669":"#9ca3af"}}>{viable?"✅ Viable":"—"}</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div style={{fontSize:10,color:"#6b7280",lineHeight:1.5}}>Refi window opens when equity ≥ 20% and debt coverage is stable.</div>
+                  </div>
+                </div>
+
+                {/* 30-Year Detail Table */}
+                <div style={{background:"white",borderRadius:12,border:"1.5px solid #e5e7eb",overflow:"hidden",boxShadow:"0 1px 4px rgba(0,0,0,0.05)"}}>
+                  <div style={{padding:"12px 16px",borderBottom:"1px solid #f3f4f6"}}>
+                    <span style={{fontSize:10,fontWeight:700,color:"#374151",textTransform:"uppercase",letterSpacing:"0.07em"}}>Year-by-Year (Base)</span>
+                  </div>
+                  <div style={{overflowX:"auto"}}>
+                    <table style={{width:"100%",borderCollapse:"collapse"}}>
+                      <thead><tr style={{borderBottom:"2px solid #f3f4f6",background:"#fafafa"}}>
+                        {["Year","Rent","Value","Equity","Mo. CF","Mult."].map(h=>(
+                          <th key={h} style={{padding:"7px 10px",textAlign:h==="Year"?"left":"right",fontSize:9,fontWeight:700,color:"#9ca3af",textTransform:"uppercase",letterSpacing:"0.05em",whiteSpace:"nowrap"}}>{h}</th>
+                        ))}
+                      </tr></thead>
+                      <tbody>
+                        {rows.map((p,pi)=>(
+                          <tr key={p.yr} style={{borderBottom:"1px solid #f9fafb",background:pi%2===0?"white":"#fafafa"}}>
+                            <td style={{padding:"7px 10px",fontSize:11,color:"#374151",fontWeight:600}}>Yr {p.yr}</td>
+                            <td style={{padding:"7px 10px",textAlign:"right",fontFamily:"'DM Mono',monospace",color:"#374151",fontSize:10}}>{fmtD(c.effRent>0?Math.round(c.effRent*Math.pow(1+rentG/100,p.yr)):0)}/mo</td>
+                            <td style={{padding:"7px 10px",textAlign:"right",fontFamily:"'DM Mono',monospace",color:"#374151",fontSize:10}}>{fmtM(p.val)}</td>
+                            <td style={{padding:"7px 10px",textAlign:"right",fontFamily:"'DM Mono',monospace",color:"#059669",fontSize:10,fontWeight:700}}>{fmtM(p.eq)}</td>
+                            <td style={{padding:"7px 10px",textAlign:"right",fontFamily:"'DM Mono',monospace",color:p.mcfY>=0?"#059669":"#dc2626",fontSize:10,fontWeight:700}}>{fmtD(p.mcfY)}</td>
+                            <td style={{padding:"7px 10px",textAlign:"right",fontFamily:"'DM Mono',monospace",color:p.mult>=1.5?"#059669":"#d97706",fontSize:11,fontWeight:800}}>{p.mult}×</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
               </div>
-            </div>
-          )}
+            );
+          })()}
+
         </div>
       </div>
     </div>
