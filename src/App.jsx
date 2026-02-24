@@ -1524,9 +1524,9 @@ function RentalCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro,al
   const isPro = isProProp||profile?.is_pro||false;
 
   const [i,setI]=useState(saved||{
-    pp:320000,down:20,rate:7.5,term:30,cc:8500,rehab:0,
-    rent:2800,otherIncome:0,
-    taxes:350,insurance:120,vacancy:140,repairs:100,capex:100,mgmt:224,utilities:0,hoa:0,
+    pp:"",down:20,rate:7.5,term:30,cc:"",rehab:"",
+    rent:"",otherIncome:0,
+    taxes:"",insurance:"",vacancy:"",repairs:"",capex:"",mgmt:"",utilities:0,hoa:0,
     appreciation:3,rentGrowth:2,expenseGrowth:2,
   });
   const sv=k=>v=>setI(p=>({...p,[k]:v}));
@@ -1602,6 +1602,38 @@ function RentalCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro,al
   let cumCF=0;
   const cfChartData=c.proj.map(p=>{cumCF+=p.mcf*12; return{y:Math.round(cumCF),label:`Y${p.yr}`};});
 
+  // Deal Identity sentence
+  const dealIdentity = (()=>{
+    if(survival.isFail) return "This deal has a structural failure — it cannot service its own debt.";
+    if(composite.verdict==="Strong Buy") return "This is a high-conviction, well-covered income deal with strong capital efficiency.";
+    if(composite.verdict==="Buy") return "This is a solid buy-and-hold deal with manageable risk and positive cash dynamics.";
+    if(survival.label==="Stable"&&income.label==="Moderate") return "This is a stable but slow capital recovery deal. Cash flow is real but thin.";
+    if(survival.label==="Fragile") return "This deal survives on thin margins. One vacancy event tests break-even.";
+    if(income.label==="Weak") return "This deal covers debt but generates little distributable income at current terms.";
+    if(capital.label==="Low") return "Capital recovery depends heavily on appreciation. Cash flow alone won't recover your investment.";
+    return "This deal has mixed fundamentals. Review stress results before committing capital.";
+  })();
+
+  // Capital Recovery Score (replaces IRR focus)
+  const capRecovery = (()=>{
+    const yrs = liq?.yearsToRecover;
+    const refiOk = scenarios[1]?.refiViable; // base case
+    const eq5 = capital.eq5||0;
+    const ti = c.ti||1;
+    const equityYield = eq5/ti; // equity built per $ invested
+
+    // Score 0-100
+    const yrsScore  = !yrs?0: yrs<=5?100: yrs<=8?80: yrs<=12?60: yrs<=20?35: 10;
+    const refiScore = refiOk?100:40;
+    const eqScore   = Math.min(100, Math.round(equityYield*100));
+    const score     = Math.round(yrsScore*0.40 + refiScore*0.30 + eqScore*0.30);
+
+    const label = score>=80?"Excellent": score>=60?"Good": score>=40?"Fair": "Slow";
+    const color = score>=80?"#059669": score>=60?"#2563eb": score>=40?"#d97706": "#dc2626";
+    return {score, label, color, yrs, refiOk, equityYield:+equityYield.toFixed(2)};
+  })();
+
+
   return(
     <div style={{display:"flex",flexDirection:"column",gap:0}}>
       <AddressBar value={addr} onChange={setAddr}/>
@@ -1615,7 +1647,7 @@ function RentalCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro,al
           <div style={{background:"rgba(255,255,255,0.07)",borderRadius:10,padding:"10px 16px",flexShrink:0,borderLeft:`3px solid ${vColor}`}}>
             <div style={{fontSize:9,color:"rgba(255,255,255,0.35)",textTransform:"uppercase",fontWeight:700,letterSpacing:"0.07em",marginBottom:4}}>AI Capital Engine</div>
             <div style={{fontSize:18,fontWeight:900,color:vColor,lineHeight:1,marginBottom:3}}>{vIcon} {verdict}</div>
-            <div style={{fontSize:9,color:"rgba(255,255,255,0.45)",lineHeight:1.4,maxWidth:180}}>{primaryRisk}</div>
+            <div style={{fontSize:9,color:"rgba(255,255,255,0.45)",lineHeight:1.4,maxWidth:200}}>{dealIdentity}</div>
           </div>
           {/* Score + Confidence */}
           <div style={{display:"flex",flexDirection:"column",gap:4,background:"rgba(255,255,255,0.05)",borderRadius:8,padding:"8px 12px"}}>
@@ -1673,7 +1705,7 @@ function RentalCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro,al
       <div className="calc-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:18,alignItems:"start"}}>
 
         {/* ── LEFT: INPUTS ── */}
-        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+        <div style={{display:"flex",flexDirection:"column",gap:10,position:"sticky",top:12,maxHeight:"calc(100vh - 24px)",overflowY:"auto",scrollbarWidth:"none"}}>
           <InputSection title="Acquisition" accent="#10b981" key={`acq-${viewMode}`} defaultOpen={viewMode!=="decision"} badge={viewMode==="decision"?`${fmtD(c.effPP)} · ${fmtD(mort)}/mo`:undefined}>
             <div style={{display:"flex",flexDirection:"column",gap:10}}>
               <NF label="Purchase Price" value={i.pp} onChange={sv("pp")} prefix="$" step={5000}/>
@@ -1771,17 +1803,17 @@ function RentalCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro,al
           {viewMode==="decision"&&(
             <ProGate isPro={isPro} trigger="unlock" onActivatePro={onActivatePro}>
               <>
-                {/* A: VERDICT + RISK TOLERANCE */}
+                {/* ── VERDICT CARD ── */}
                 <div style={{background:vBg,borderRadius:12,border:`2px solid ${vColor}30`,padding:"16px 18px"}}>
                   <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>
                     <div style={{flex:1,minWidth:180}}>
-                      <div style={{fontSize:9,fontWeight:700,color:vColor,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:5}}>AI Capital Allocation Engine</div>
-                      <div style={{fontSize:26,fontWeight:900,color:vColor,lineHeight:1,marginBottom:4}}>{vIcon} {verdict}</div>
-                      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
-                        <span style={{fontSize:28,fontWeight:900,fontFamily:"'DM Mono',monospace",color:vColor}}>{vScore}</span>
+                      <div style={{fontSize:9,fontWeight:700,color:vColor,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:5}}>Capital Allocation Engine</div>
+                      <div style={{fontSize:26,fontWeight:900,color:vColor,lineHeight:1,marginBottom:6}}>{vIcon} {verdict}</div>
+                      <div style={{fontSize:13,color:"#374151",lineHeight:1.5,marginBottom:4,fontStyle:"italic"}}>{dealIdentity}</div>
+                      <div style={{display:"flex",alignItems:"center",gap:6}}>
+                        <span style={{fontSize:22,fontWeight:900,fontFamily:"'DM Mono',monospace",color:vColor}}>{vScore}</span>
                         <span style={{fontSize:10,color:"#6b7280"}}>/ 100 · {confidence} confidence</span>
                       </div>
-                      <div style={{fontSize:11,color:"#374151",lineHeight:1.5}}>Primary risk: {primaryRisk}</div>
                     </div>
                     <div style={{flexShrink:0}}>
                       <div style={{fontSize:9,color:"#9ca3af",textTransform:"uppercase",fontWeight:700,marginBottom:6,textAlign:"right"}}>Risk Tolerance</div>
@@ -1797,30 +1829,47 @@ function RentalCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro,al
                   </div>
                 </div>
 
-                {/* B: UNDERWRITING PILLARS — scored bars */}
+                {/* ── PANEL 1: DEAL ANALYSIS (Underwriting + Screening merged) ── */}
                 <div style={{background:"white",borderRadius:12,border:"1.5px solid #f0f0f0",overflow:"hidden",boxShadow:"0 1px 4px rgba(0,0,0,0.04)"}}>
                   <div style={{padding:"10px 16px",borderBottom:"1px solid #f3f4f6",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-                    <span style={{fontSize:10,fontWeight:700,color:"#374151",textTransform:"uppercase",letterSpacing:"0.07em"}}>Underwriting Engine</span>
-                    <span style={{fontSize:10,color:"#9ca3af"}}>Weighted: {Math.round(RISK_CONFIG[riskTol].survivalW*100)}% / {Math.round(RISK_CONFIG[riskTol].incomeW*100)}% / {Math.round(RISK_CONFIG[riskTol].capitalW*100)}%</span>
+                    <span style={{fontSize:10,fontWeight:700,color:"#374151",textTransform:"uppercase",letterSpacing:"0.07em"}}>Deal Analysis</span>
+                    <span style={{fontSize:10,color:"#9ca3af"}}>Weights: {Math.round(RISK_CONFIG[riskTol].survivalW*100)}% / {Math.round(RISK_CONFIG[riskTol].incomeW*100)}% / {Math.round(RISK_CONFIG[riskTol].capitalW*100)}%</span>
                   </div>
                   {[
-                    {name:"Survival",  d:survival,  metrics_:[["DSCR",c.dscr.toFixed(2)+"x"],["BEO",(c.beo*100).toFixed(1)+"%"],["Refi DSCR",survival.refiDSCR+"x"],["Refi Risk",survival.refiVuln]], diag: survival.label==="Structural Fail"||survival.isFail?"Structural failure. Debt service or occupancy requirements cannot be met at current terms.": survival.label==="Critical"?"Near-zero margin. Minor stress event eliminates debt coverage.": survival.label==="Fragile"?"Debt coverage fragile — one vacancy event could breach break-even.": survival.label==="Stable"?"Coverage adequate. Limited stress margin.": "Debt well covered. Healthy vacancy buffer. Stress-tested as resilient."},
-                    {name:"Income",    d:income,    metrics_:[["Monthly CF",fmtD(c.mcf)+"/mo"],["CoC",fmtP(c.coc)],["5yr CF",fmtD(income.cum5)],["Durability",income.durGrade]], diag: income.label==="Weak"?"Property does not produce distributable income at current inputs.": income.label==="Moderate"?"Pays modestly. Below benchmark but positive cash-on-cash.":"Cash flow above institutional benchmarks. Distributable income is real."},
-                    {name:"Capital",   d:capital,   metrics_:[["5yr Paydown",fmtD(capital.pd5)],["Equity ×",capital.equityMultiple+"x"],["IRR",capital.irr!=null?fmtP(capital.irr):"—"],["Amor. Dep.",(capital.amorDep*100).toFixed(0)+"%"]], diag: capital.label==="Low"?"Returns depend heavily on appreciation. Cash barely recovers capital.": capital.label==="Moderate"?"Capital growth driven mainly by amortization, limited cash contribution.":"Capital working efficiently. Strong equity buildup and cash returns."},
-                  ].map(({name,d,metrics_,diag},pi)=>{
+                    {name:"Survival", d:survival, chips:[
+                      ["DSCR",c.dscr.toFixed(2)+"x"],["BEO",(c.beo*100).toFixed(1)+"%"],
+                      ["Refi DSCR",survival.refiDSCR+"x"],["Refi Risk",survival.refiVuln]],
+                      diag: survival.isFail?"Structural failure — debt service or occupancy threshold cannot be met.":
+                            survival.label==="Critical"?"Near-zero margin. One stress event eliminates coverage.":
+                            survival.label==="Fragile"?"Coverage fragile — one vacancy event tests break-even.":
+                            survival.label==="Stable"?"Coverage adequate. Stress margin is limited but present.":
+                            "Debt well covered. Vacancy buffer is healthy."},
+                    {name:"Income",   d:income,   chips:[
+                      ["Monthly CF",fmtD(c.mcf)+"/mo"],["CoC",fmtP(c.coc)],
+                      ["5yr CF",fmtD(income.cum5)],["Durability",income.durGrade]],
+                      diag: income.label==="Weak"?"Property does not produce distributable income at current inputs.":
+                            income.label==="Moderate"?"Pays modestly — below benchmark but positive carry.":
+                            "Above-benchmark cash flow. Income is real and durable."},
+                    {name:"Capital",  d:capital,  chips:[
+                      ["5yr Paydown",fmtD(capital.pd5)],["Equity ×",capital.equityMultiple+"x"],
+                      ["Capital Rcvry",capRecovery.yrs?capRecovery.yrs+" yrs":"Long"],["Amor. Dep.",(capital.amorDep*100).toFixed(0)+"%"]],
+                      diag: capital.label==="Low"?"Returns depend heavily on appreciation. Cash flow barely recovers capital.":
+                            capital.label==="Moderate"?"Capital growth driven mainly by amortization with limited cash contribution.":
+                            "Capital working efficiently — strong equity build and cash returns."},
+                  ].map(({name,d,chips,diag},pi)=>{
                     const isAlert=d.isFail||d.label==="Critical"||d.label==="Weak"||d.label==="Low";
                     return(
                       <div key={name} style={{padding:"13px 16px",borderBottom:pi<2?"1px solid #f3f4f6":"none"}}>
-                        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
+                        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:7}}>
                           <span style={{fontSize:9,fontWeight:800,color:"#9ca3af",textTransform:"uppercase",letterSpacing:"0.08em",width:52,flexShrink:0}}>{name}</span>
-                          <div style={{flex:1,height:6,background:"#f3f4f6",borderRadius:3,overflow:"hidden"}}>
+                          <div style={{flex:1,height:5,background:"#f3f4f6",borderRadius:3,overflow:"hidden"}}>
                             <div style={{height:"100%",width:d.score+"%",background:d.color,borderRadius:3,transition:"width 0.5s ease"}}/>
                           </div>
-                          <span style={{fontSize:13,fontWeight:800,fontFamily:"'DM Mono',monospace",color:d.color,width:32,textAlign:"right"}}>{d.score}</span>
-                          <span style={{fontSize:11,fontWeight:700,color:isAlert?d.color:"#374151",width:70,flexShrink:0}}>{d.label}</span>
+                          <span style={{fontSize:12,fontWeight:800,fontFamily:"'DM Mono',monospace",color:d.color,width:28,textAlign:"right"}}>{d.score}</span>
+                          <span style={{fontSize:11,fontWeight:700,color:isAlert?d.color:"#374151",width:72,flexShrink:0,textAlign:"right"}}>{d.label}</span>
                         </div>
-                        <div style={{display:"flex",gap:14,marginBottom:6}}>
-                          {metrics_.map(([l,v])=>(
+                        <div style={{display:"flex",gap:12,marginBottom:6,flexWrap:"wrap"}}>
+                          {chips.map(([l,v])=>(
                             <div key={l}>
                               <div style={{fontSize:8,color:"#9ca3af",textTransform:"uppercase",fontWeight:700,letterSpacing:"0.05em",marginBottom:1}}>{l}</div>
                               <div style={{fontSize:11,fontWeight:700,fontFamily:"'DM Mono',monospace",color:"#374151"}}>{v}</div>
@@ -1833,19 +1882,16 @@ function RentalCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro,al
                   })}
                 </div>
 
-                {/* C: RISK ENGINE — Shock Simulator */}
+                {/* ── PANEL 2: STRESS & SCENARIOS (Risk + Scenario merged) ── */}
                 <div style={{background:"white",borderRadius:12,border:"1.5px solid #f0f0f0",overflow:"hidden",boxShadow:"0 1px 4px rgba(0,0,0,0.04)"}}>
                   <div style={{padding:"10px 16px",borderBottom:"1px solid #f3f4f6",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-                    <div>
-                      <span style={{fontSize:10,fontWeight:700,color:"#374151",textTransform:"uppercase",letterSpacing:"0.07em"}}>Risk Engine</span>
-                      <span style={{fontSize:9,color:"#9ca3af",marginLeft:8}}>Survival probability under stress</span>
-                    </div>
+                    <span style={{fontSize:10,fontWeight:700,color:"#374151",textTransform:"uppercase",letterSpacing:"0.07em"}}>Stress & Scenarios</span>
                     <div style={{display:"flex",alignItems:"center",gap:6}}>
-                      <span style={{fontSize:18,fontWeight:900,fontFamily:"'DM Mono',monospace",color:risk.survivalProb>=80?"#059669":risk.survivalProb>=60?"#d97706":"#dc2626"}}>{risk.survivalProb}%</span>
-                      <span style={{fontSize:9,color:"#9ca3af"}}>survive</span>
+                      <span style={{fontSize:16,fontWeight:900,fontFamily:"'DM Mono',monospace",color:risk.survivalProb>=80?"#059669":risk.survivalProb>=60?"#d97706":"#dc2626"}}>{risk.survivalProb}%</span>
+                      <span style={{fontSize:9,color:"#9ca3af",lineHeight:1.3}}>scenarios<br/>survived</span>
                     </div>
                   </div>
-                  {/* Tab selector */}
+                  {/* Stress tabs */}
                   <div style={{display:"flex",borderBottom:"1px solid #f3f4f6"}}>
                     {["vacancy","interest","rent","expense"].map(t=>(
                       <button key={t} onClick={()=>setStressTab(t)}
@@ -1854,47 +1900,86 @@ function RentalCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro,al
                       </button>
                     ))}
                   </div>
-                  <div style={{padding:"12px 16px"}}>
-                    {risk.scenarios.filter(s=>s.cat===stressTab).map((s,si)=>(
-                      <div key={si} style={{display:"flex",alignItems:"center",gap:10,padding:"6px 0",borderBottom:si<risk.scenarios.filter(x=>x.cat===stressTab).length-1?"1px solid #f9fafb":"none"}}>
-                        <span style={{fontSize:11,color:"#6b7280",width:100,flexShrink:0}}>{s.label}</span>
+                  <div style={{padding:"10px 16px"}}>
+                    <div style={{fontSize:9,color:"#9ca3af",marginBottom:8,fontStyle:"italic"}}>
+                      {stressTab==="vacancy"?"Simulating 1–3 months vacancy per year":
+                       stressTab==="interest"?"Simulating rate increase at refinance":
+                       stressTab==="rent"?"Simulating rent compression from market softening":
+                       "Simulating expense inflation over hold period"}
+                    </div>
+                    {risk.scenarios.filter(s=>s.cat===stressTab).map((s,si,arr)=>(
+                      <div key={si} style={{display:"flex",alignItems:"center",gap:10,padding:"5px 0",borderBottom:si<arr.length-1?"1px solid #f9fafb":"none"}}>
+                        <span style={{fontSize:11,color:"#6b7280",width:90,flexShrink:0}}>{s.label}</span>
                         <div style={{flex:1,height:4,background:"#f3f4f6",borderRadius:2,overflow:"hidden"}}>
                           <div style={{height:"100%",width:Math.max(0,Math.min(100,(s.dscr/2)*100))+"%",background:s.breaches?"#dc2626":"#059669",borderRadius:2}}/>
                         </div>
-                        <span style={{fontSize:11,fontWeight:700,fontFamily:"'DM Mono',monospace",color:s.breaches?"#dc2626":"#374151",width:40,textAlign:"right"}}>{s.dscr.toFixed(2)}x</span>
-                        <span style={{fontSize:11,fontFamily:"'DM Mono',monospace",color:s.cf>=0?"#059669":"#dc2626",width:70,textAlign:"right"}}>{fmtD(s.cf)}/mo</span>
-                        {s.breaches&&<span style={{fontSize:8,color:"#dc2626",background:"#fef2f2",padding:"1px 5px",borderRadius:100,fontWeight:700,flexShrink:0}}>BREACH</span>}
+                        <span style={{fontSize:11,fontWeight:700,fontFamily:"'DM Mono',monospace",color:s.breaches?"#dc2626":"#374151",width:38,textAlign:"right"}}>{s.dscr.toFixed(2)}x</span>
+                        <span style={{fontSize:11,fontFamily:"'DM Mono',monospace",color:s.cf>=0?"#059669":"#dc2626",width:68,textAlign:"right"}}>{fmtD(s.cf)}/mo</span>
+                        {s.breaches&&<span style={{fontSize:8,color:"#dc2626",background:"#fef2f2",padding:"1px 4px",borderRadius:100,fontWeight:700,flexShrink:0}}>BREACH</span>}
                       </div>
                     ))}
                   </div>
-                  {monte&&(
-                    <div style={{padding:"10px 16px",borderTop:"1px solid #f3f4f6",background:"#f9fafb",display:"flex",gap:16}}>
-                      {[["P(Neg CF)",monte.pNegCF+"%"],["P(DSCR<1)",monte.pDSCR+"%"],["Median CF",fmtD(monte.median)+"/mo"],["Worst 10%",fmtD(monte.worst10)+"/mo"]].map(([l,v])=>(
-                        <div key={l}>
-                          <div style={{fontSize:8,color:"#9ca3af",textTransform:"uppercase",fontWeight:700,marginBottom:1}}>{l}</div>
-                          <div style={{fontSize:12,fontWeight:700,fontFamily:"'DM Mono',monospace",color:"#374151"}}>{v}</div>
+                  {/* Scenario range */}
+                  <div style={{borderTop:"1px solid #f3f4f6",padding:"10px 16px"}}>
+                    <div style={{fontSize:9,color:"#9ca3af",textTransform:"uppercase",fontWeight:700,letterSpacing:"0.06em",marginBottom:8}}>5-Year Outcome Range</div>
+                    <div style={{display:"flex",gap:6}}>
+                      {scenarios.map((sc,si)=>(
+                        <div key={si} onClick={()=>setScenTab(si)}
+                          style={{flex:1,padding:"8px 6px",borderRadius:8,border:`1.5px solid ${scenTab===si?sc.color:"#f0f0f0"}`,background:scenTab===si?sc.color+"10":"#fafafa",cursor:"pointer",textAlign:"center",transition:"all 0.12s"}}>
+                          <div style={{fontSize:8,fontWeight:700,color:sc.color,textTransform:"uppercase",marginBottom:2}}>{sc.label}</div>
+                          <div style={{fontSize:11,fontWeight:800,fontFamily:"'DM Mono',monospace",color:"#374151"}}>{fmtD(sc.eq5)}</div>
+                          <div style={{fontSize:8,color:"#9ca3af"}}>equity</div>
+                          <div style={{fontSize:9,fontFamily:"'DM Mono',monospace",color:sc.cumCF>=0?"#059669":"#dc2626",fontWeight:700,marginTop:2}}>{fmtD(sc.cumCF)} CF</div>
+                          <div style={{fontSize:8,color:sc.refiViable?"#059669":"#9ca3af",marginTop:1}}>{sc.refiViable?"✅ Refi":"⚠️ Refi"}</div>
                         </div>
                       ))}
                     </div>
-                  )}
+                    {monte&&(
+                      <div style={{display:"flex",gap:14,marginTop:10,padding:"8px 10px",background:"#f9fafb",borderRadius:8}}>
+                        {[["P(Neg CF)",monte.pNegCF+"%"],["P(DSCR<1)",monte.pDSCR+"%"],["Median CF",fmtD(monte.median)+"/mo"],["Worst 10%",fmtD(monte.worst10)+"/mo"]].map(([l,v])=>(
+                          <div key={l}>
+                            <div style={{fontSize:8,color:"#9ca3af",textTransform:"uppercase",fontWeight:700,marginBottom:1}}>{l}</div>
+                            <div style={{fontSize:11,fontWeight:700,fontFamily:"'DM Mono',monospace",color:"#374151"}}>{v}</div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
 
-                {/* D: OPTIMIZATION ENGINE */}
-                <div style={{background:"white",borderRadius:12,border:"1.5px solid #bbf7d0",overflow:"hidden",boxShadow:"0 1px 4px rgba(0,0,0,0.04)"}}>
-                  <div style={{padding:"10px 16px",background:"#f0fdf4",borderBottom:"1px solid #d1fae5",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-                    <div>
-                      <span style={{fontSize:10,fontWeight:700,color:"#065f46",textTransform:"uppercase",letterSpacing:"0.07em"}}>🎯 Optimization Engine</span>
-                      <span style={{fontSize:9,color:"#6b7280",marginLeft:8}}>Multi-variable constraint solver</span>
+                {/* ── PANEL 3: CAPITAL RECOVERY (Optimization + Liquidity merged) ── */}
+                <div style={{background:"white",borderRadius:12,border:"1.5px solid #f0f0f0",overflow:"hidden",boxShadow:"0 1px 4px rgba(0,0,0,0.04)"}}>
+                  <div style={{padding:"10px 16px",borderBottom:"1px solid #f3f4f6",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                    <span style={{fontSize:10,fontWeight:700,color:"#374151",textTransform:"uppercase",letterSpacing:"0.07em"}}>Capital Recovery</span>
+                    <div style={{display:"flex",alignItems:"center",gap:6}}>
+                      <span style={{fontSize:16,fontWeight:900,fontFamily:"'DM Mono',monospace",color:capRecovery.color}}>{capRecovery.score}</span>
+                      <span style={{fontSize:10,fontWeight:700,color:capRecovery.color,background:capRecovery.color+"15",padding:"2px 8px",borderRadius:100}}>{capRecovery.label}</span>
                     </div>
-                    <span style={{fontSize:10,fontWeight:700,color:vColor}}>{vIcon} {vScore}/100</span>
                   </div>
-                  <div style={{padding:"12px 16px"}}>
-                    {/* Sliders */}
-                    <OSlider label="Purchase Price" value={pp} onChange={v=>setOptPP(v)} min={Math.round(+i.pp*0.55)} max={Math.round(+i.pp*1.2)} step={5000} display={v=>`$${Math.round(v/1000)}K`}/>
-                    <OSlider label="Monthly Rent"   value={optRentVal} onChange={v=>setOptRent(v)} min={Math.round(+i.rent*0.65)} max={Math.round(+i.rent*1.5)} step={50} display={v=>`$${v.toLocaleString()}/mo`}/>
+                  {/* Recovery metrics row */}
+                  <div style={{padding:"12px 16px",borderBottom:"1px solid #f3f4f6"}}>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:8}}>
+                      {[
+                        ["Capital In",      fmtD(c.ti),                   "#374151"],
+                        ["Recover In",      liq?.yearsToRecover?liq.yearsToRecover+" yrs":"Long", capRecovery.color],
+                        ["5yr Equity",      fmtD(capital.eq5),             "#059669"],
+                        ["Refi (Base)",     scenarios[1]?.refiViable?"✅ Viable":"⚠️ Uncertain", scenarios[1]?.refiViable?"#059669":"#d97706"],
+                      ].map(([l,v,col])=>(
+                        <div key={l} style={{background:"#f9fafb",borderRadius:8,padding:"8px 10px",textAlign:"center"}}>
+                          <div style={{fontSize:8,color:"#9ca3af",textTransform:"uppercase",fontWeight:700,marginBottom:3}}>{l}</div>
+                          <div style={{fontSize:13,fontWeight:800,fontFamily:"'DM Mono',monospace",color:col,lineHeight:1}}>{v}</div>
+                        </div>
+                      ))}
+                    </div>
+                    {liq&&<p style={{fontSize:10,color:liq.riskColor,background:liq.riskColor+"10",padding:"6px 10px",borderRadius:6,margin:"10px 0 0",fontWeight:600,lineHeight:1.4}}>{liq.riskReason}</p>}
+                  </div>
+                  {/* Optimization solver */}
+                  <div style={{padding:"12px 16px",background:"#f9fdfb",borderBottom:"1px solid #f0f0f0"}}>
+                    <div style={{fontSize:9,fontWeight:700,color:"#065f46",textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:10}}>🎯 Fix-The-Deal Solver</div>
+                    <OSlider label="Purchase Price" value={pp} onChange={v=>setOptPP(v)} min={Math.round((+i.pp||320000)*0.55)} max={Math.round((+i.pp||320000)*1.2)} step={5000} display={v=>`$${Math.round(v/1000)}K`}/>
+                    <OSlider label="Monthly Rent"   value={optRentVal} onChange={v=>setOptRent(v)} min={Math.round((+i.rent||2800)*0.65)} max={Math.round((+i.rent||2800)*1.5)} step={50} display={v=>`$${v.toLocaleString()}/mo`}/>
                     <OSlider label="Down Payment"   value={down} onChange={v=>setOptDown(v)} min={5} max={50} step={1} display={v=>`${v}%`}/>
-                    {/* Target selector */}
-                    <div style={{display:"flex",gap:4,flexWrap:"wrap",marginTop:8,marginBottom:12}}>
+                    <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:10}}>
                       <span style={{fontSize:9,fontWeight:700,color:"#9ca3af",textTransform:"uppercase",alignSelf:"center",marginRight:4}}>Target:</span>
                       {["DSCR 1.25","8% CoC","$300/mo CF","Min Capital"].map(t=>(
                         <button key={t} onClick={()=>setOptTarget(t)}
@@ -1903,15 +1988,14 @@ function RentalCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro,al
                         </button>
                       ))}
                     </div>
-                    {/* Results */}
                     {optSteps.length===0?(
                       <div style={{padding:"10px",background:"#f0fdf4",borderRadius:8,textAlign:"center",fontSize:12,color:"#059669",fontWeight:700}}>✅ Already meets {optTarget}</div>
                     ):(
-                      <div style={{background:"#f9fafb",borderRadius:10,border:"1px solid #e5e7eb",padding:"12px"}}>
+                      <div style={{background:"white",borderRadius:10,border:"1px solid #e5e7eb",padding:"10px"}}>
                         <div style={{fontSize:10,fontWeight:700,color:"#374151",marginBottom:8}}>To reach <strong>{optTarget}</strong>:</div>
                         {optSteps.map((opt,oi)=>(
-                          <div key={oi} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 0",borderBottom:oi<optSteps.length-1?"1px solid #f3f4f6":"none"}}>
-                            <span style={{fontSize:14,flexShrink:0}}>{opt.icon}</span>
+                          <div key={oi} style={{display:"flex",alignItems:"center",gap:10,padding:"7px 0",borderBottom:oi<optSteps.length-1?"1px solid #f3f4f6":"none"}}>
+                            <span style={{fontSize:13,flexShrink:0}}>{opt.icon}</span>
                             <div style={{flex:1}}>
                               <div style={{fontSize:11,color:"#374151",fontWeight:600}}>{opt.label}</div>
                               <div style={{display:"flex",alignItems:"center",gap:8}}>
@@ -1928,101 +2012,29 @@ function RentalCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro,al
                   </div>
                 </div>
 
-                {/* E: SCENARIO ENGINE */}
-                <div style={{background:"white",borderRadius:12,border:"1.5px solid #f0f0f0",overflow:"hidden",boxShadow:"0 1px 4px rgba(0,0,0,0.04)"}}>
-                  <div style={{padding:"10px 16px",borderBottom:"1px solid #f3f4f6",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-                    <span style={{fontSize:10,fontWeight:700,color:"#374151",textTransform:"uppercase",letterSpacing:"0.07em"}}>Scenario Engine</span>
-                    <span style={{fontSize:9,color:"#9ca3af"}}>4 probabilistic cases · Expected IRR: {(()=>{const e=scenarios.reduce((s,sc)=>s+(sc.irr||0)*sc.prob,0); return e?fmtP(e):"—";})()}</span>
-                  </div>
-                  {/* Scenario tabs */}
-                  <div style={{display:"flex",borderBottom:"1px solid #f3f4f6"}}>
-                    {scenarios.map((sc,si)=>(
-                      <button key={si} onClick={()=>setScenTab(si)}
-                        style={{flex:1,padding:"7px 4px",border:"none",background:scenTab===si?"#f9fafb":"white",borderBottom:scenTab===si?`2px solid ${sc.color}`:"2px solid transparent",fontSize:9,fontWeight:700,color:scenTab===si?sc.color:"#9ca3af",cursor:"pointer",transition:"all 0.1s"}}>
-                        {sc.label}<br/><span style={{fontSize:8,fontWeight:400,color:"#9ca3af"}}>{Math.round(sc.prob*100)}%</span>
-                      </button>
-                    ))}
-                  </div>
-                  {(()=>{
-                    const sc=scenarios[scenTab];
-                    if(!sc) return null;
-                    return(
-                      <div style={{padding:"14px 16px"}}>
-                        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:12}}>
-                          {[["5yr IRR",sc.irr!=null?fmtP(sc.irr):"—",sc.color],["5yr Equity",fmtD(sc.eq5),"#374151"],["Cum. CF",fmtD(sc.cumCF),sc.cumCF>=0?"#059669":"#dc2626"],].map(([l,v,col])=>(
-                            <div key={l} style={{background:"#f9fafb",borderRadius:8,padding:"10px 12px",textAlign:"center"}}>
-                              <div style={{fontSize:9,color:"#9ca3af",textTransform:"uppercase",fontWeight:700,marginBottom:3}}>{l}</div>
-                              <div style={{fontSize:16,fontWeight:800,fontFamily:"'DM Mono',monospace",color:col}}>{v}</div>
-                            </div>
-                          ))}
-                        </div>
-                        <div style={{display:"flex",gap:8,marginBottom:8}}>
-                          {sc.cfs.map((cf,yi)=>(
-                            <div key={yi} style={{flex:1,textAlign:"center"}}>
-                              <div style={{height:40,display:"flex",alignItems:"flex-end",justifyContent:"center",marginBottom:3}}>
-                                <div style={{width:"70%",height:Math.min(40,Math.max(4,Math.abs(cf)/20))+"px",background:cf>=0?sc.color:"#dc2626",borderRadius:2,opacity:0.8}}/>
-                              </div>
-                              <div style={{fontSize:9,color:"#9ca3af",fontWeight:600}}>Y{yi+1}</div>
-                              <div style={{fontSize:9,fontFamily:"'DM Mono',monospace",color:cf>=0?"#059669":"#dc2626",fontWeight:700}}>{fmtD(cf)}</div>
-                            </div>
-                          ))}
-                        </div>
-                        <div style={{fontSize:10,color:sc.refiViable?"#059669":"#6b7280",background:sc.refiViable?"#f0fdf4":"#f9fafb",padding:"6px 10px",borderRadius:6,fontWeight:600}}>
-                          {sc.refiViable?"✅ Refi viable at year 5 (≥20% equity)":"⚠️ Refi at year 5 uncertain — equity may be insufficient"}
-                        </div>
-                      </div>
-                    );
-                  })()}
-                </div>
-
-                {/* F: PORTFOLIO INTELLIGENCE */}
+                {/* ── PORTFOLIO IMPACT (only if other deals exist) ── */}
                 {portImpact&&portImpact.dealCount>0&&(
                   <div style={{background:"white",borderRadius:12,border:"1.5px solid #f0f0f0",overflow:"hidden",boxShadow:"0 1px 4px rgba(0,0,0,0.04)"}}>
                     <div style={{padding:"10px 16px",borderBottom:"1px solid #f3f4f6"}}>
-                      <span style={{fontSize:10,fontWeight:700,color:"#374151",textTransform:"uppercase",letterSpacing:"0.07em"}}>Portfolio Intelligence</span>
-                      <span style={{fontSize:9,color:"#9ca3af",marginLeft:8}}>Impact of adding this deal</span>
-                    </div>
-                    <div style={{padding:"12px 16px"}}>
-                      <div style={{fontSize:10,color:"#374151",marginBottom:10,lineHeight:1.6}}>
-                        Adding this deal would:
-                      </div>
-                      <div style={{display:"flex",flexDirection:"column",gap:6}}>
-                        {portImpact.portDSCR_before!=null&&(
-                          <div style={{display:"flex",alignItems:"center",gap:8,padding:"6px 10px",background:"#f9fafb",borderRadius:8}}>
-                            <span style={{fontSize:12}}>{portImpact.portDSCR_after<portImpact.portDSCR_before?"📉":"📈"}</span>
-                            <span style={{fontSize:11,color:"#374151"}}>Portfolio DSCR: <strong>{portImpact.portDSCR_before}x</strong> → <strong style={{color:portImpact.portDSCR_after<portImpact.portDSCR_before?"#dc2626":"#059669"}}>{portImpact.portDSCR_after}x</strong></span>
-                          </div>
-                        )}
-                        <div style={{display:"flex",alignItems:"center",gap:8,padding:"6px 10px",background:"#f9fafb",borderRadius:8}}>
-                          <span style={{fontSize:12}}>{portImpact.portMCF_after>portImpact.portMCF_before?"📈":"📉"}</span>
-                          <span style={{fontSize:11,color:"#374151"}}>Portfolio cash flow: <strong>{fmtD(portImpact.portMCF_before)}</strong> → <strong style={{color:portImpact.portMCF_after>portImpact.portMCF_before?"#059669":"#dc2626"}}>{fmtD(portImpact.portMCF_after)}/mo</strong></span>
-                        </div>
-                        {portImpact.liqMos_before!=null&&(
-                          <div style={{display:"flex",alignItems:"center",gap:8,padding:"6px 10px",background:"#f9fafb",borderRadius:8}}>
-                            <span style={{fontSize:12}}>{portImpact.liqMos_after<portImpact.liqMos_before?"⚠️":"✅"}</span>
-                            <span style={{fontSize:11,color:"#374151"}}>Liquidity coverage: <strong>{portImpact.liqMos_before.toFixed(1)} mo</strong> → <strong style={{color:portImpact.liqMos_after<RISK_CONFIG[riskTol].liquidityMos?"#dc2626":"#059669"}}>{portImpact.liqMos_after?.toFixed(1)} mo</strong> (min {RISK_CONFIG[riskTol].liquidityMos} mo)</span>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* G: LIQUIDITY */}
-                {liq&&(
-                  <div style={{background:"white",borderRadius:12,border:"1.5px solid #e5e7eb",overflow:"hidden",boxShadow:"0 1px 4px rgba(0,0,0,0.04)"}}>
-                    <div style={{padding:"10px 16px",borderBottom:"1px solid #f3f4f6",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-                      <span style={{fontSize:10,fontWeight:700,color:"#374151",textTransform:"uppercase",letterSpacing:"0.07em"}}>💧 Liquidity</span>
-                      <span style={{fontSize:10,fontWeight:700,color:liq.riskColor,background:`${liq.riskColor}15`,padding:"3px 10px",borderRadius:100}}>{liq.riskLevel}</span>
+                      <span style={{fontSize:10,fontWeight:700,color:"#374151",textTransform:"uppercase",letterSpacing:"0.07em"}}>Portfolio Impact</span>
                     </div>
                     <div style={{padding:"12px 16px",display:"flex",flexDirection:"column",gap:6}}>
-                      {[["Capital Required",fmtD(liq.capitalRequired),"#374151"],["5yr Principal Paydown",fmtD(liq.principalPaydown5),"#059669"],["Annual Cash Flow",fmtD(liq.annualCF),liq.annualCF>=0?"#059669":"#dc2626"],["Capital Recovery",liq.yearsToRecover?liq.yearsToRecover+" yrs":"Never",liq.yearsToRecover&&liq.yearsToRecover<=12?"#d97706":"#dc2626"]].map(([l,v,col])=>(
-                        <div key={l} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"5px 0",borderBottom:"1px solid #f9fafb",gap:8}}>
-                          <span style={{fontSize:12,color:"#6b7280",flex:1}}>{l}</span>
-                          <span style={{fontSize:13,fontWeight:700,fontFamily:"'DM Mono',monospace",color:col,flexShrink:0}}>{v}</span>
+                      {portImpact.portDSCR_before!=null&&(
+                        <div style={{display:"flex",alignItems:"center",gap:8,padding:"6px 10px",background:"#f9fafb",borderRadius:8}}>
+                          <span style={{fontSize:11}}>{portImpact.portDSCR_after<portImpact.portDSCR_before?"📉":"📈"}</span>
+                          <span style={{fontSize:11,color:"#374151"}}>Portfolio DSCR: <strong>{portImpact.portDSCR_before}x</strong> → <strong style={{color:portImpact.portDSCR_after<portImpact.portDSCR_before?"#dc2626":"#059669"}}>{portImpact.portDSCR_after}x</strong></span>
                         </div>
-                      ))}
-                      <p style={{fontSize:11,color:liq.riskColor,background:`${liq.riskColor}10`,padding:"8px 10px",borderRadius:8,marginTop:4,fontWeight:600,lineHeight:1.4,margin:"4px 0 0"}}>{liq.riskReason}</p>
+                      )}
+                      <div style={{display:"flex",alignItems:"center",gap:8,padding:"6px 10px",background:"#f9fafb",borderRadius:8}}>
+                        <span style={{fontSize:11}}>{portImpact.portMCF_after>portImpact.portMCF_before?"📈":"📉"}</span>
+                        <span style={{fontSize:11,color:"#374151"}}>Cash flow: <strong>{fmtD(portImpact.portMCF_before)}</strong> → <strong style={{color:portImpact.portMCF_after>portImpact.portMCF_before?"#059669":"#dc2626"}}>{fmtD(portImpact.portMCF_after)}/mo</strong></span>
+                      </div>
+                      {portImpact.liqMos_before!=null&&(
+                        <div style={{display:"flex",alignItems:"center",gap:8,padding:"6px 10px",background:"#f9fafb",borderRadius:8}}>
+                          <span style={{fontSize:11}}>{portImpact.liqMos_after<portImpact.liqMos_before?"⚠️":"✅"}</span>
+                          <span style={{fontSize:11,color:"#374151"}}>Liquidity: <strong>{portImpact.liqMos_before.toFixed(1)} mo</strong> → <strong style={{color:portImpact.liqMos_after<RISK_CONFIG[riskTol].liquidityMos?"#dc2626":"#059669"}}>{portImpact.liqMos_after?.toFixed(1)} mo</strong></span>
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}
