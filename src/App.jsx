@@ -1221,7 +1221,7 @@ function uw_survivalScore(metrics, riskTol="standard") {
   else if(score>=60){label="Stable";         color="#2563eb";}
   else if(score>=40){label="Fragile";        color="#d97706";}
   else if(score>=20){label="Critical";       color="#ea580c";}
-  else              {label="Structural Fail";color:"#dc2626"; color="#dc2626";}
+  else              {label="Structural Fail"; color="#dc2626";}
 
   const isFail = dscr<1.00 || beo>=0.95 || mcf<=-300;
 
@@ -1304,7 +1304,7 @@ function uw_compositeScore(survival, income, capital, riskTol="standard") {
   else if(score>=50){verdict="Conditional";   color="#0891b2"; bg="#ecfeff"; icon="⚙️";}
   else if(score>=35){verdict="Speculative";   color="#d97706"; bg="#fffbeb"; icon="⚠️";}
   else if(score>=20){verdict="Avoid";         color="#ea580c"; bg="#fff7ed"; icon="🚫";}
-  else              {verdict="Structural Fail";color:"#dc2626"; bg="#fef2f2"; icon:"⛔"; color="#dc2626"; icon="⛔";}
+  else              {verdict="Structural Fail"; color="#dc2626"; bg="#fef2f2"; icon="⛔";}
 
   return {score, verdict, confidence, primaryRisk, color, bg, icon};
 }
