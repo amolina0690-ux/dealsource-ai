@@ -1854,6 +1854,42 @@ function RentalCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro,al
       <AddressBar value={addr} onChange={setAddr}/>
 
       {/* ── Empty state ── */}
+      {/* ══ INPUTS (full-width below verdict) ══════════════════════════════════ */}
+      <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:16}}>
+        <InputSection title="Acquisition" accent="#10b981" defaultOpen badge={`${fmtD(c.effPP)} · ${fmtD(mort)}/mo`}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+            <NF label="Purchase Price" value={i.pp} onChange={sv("pp")} prefix="$" step={5000}/>
+            <NF label="Down %" value={i.down} onChange={sv("down")} suffix="%" step={1}/>
+            <NF label="Rate %" value={i.rate} onChange={sv("rate")} suffix="%" step={0.125}/>
+            <NF label="Term" value={i.term} onChange={sv("term")} suffix="yr" step={5}/>
+            <NF label="Closing $" value={i.cc} onChange={sv("cc")} prefix="$" step={500}/>
+            <NF label="Rehab" value={i.rehab} onChange={sv("rehab")} prefix="$" step={1000}/>
+          </div>
+          <div style={{display:"flex",justifyContent:"space-between",padding:"7px 10px",background:"#f0fdf4",borderRadius:8,marginTop:6,border:"1px solid #bbf7d0"}}>
+            <span style={{fontSize:10,color:"#6b7280"}}>{fmtD(c.loan)} loan · {i.rate}% · {i.term}yr</span>
+            <span style={{fontSize:14,fontWeight:800,fontFamily:"'DM Mono',monospace",color:"#059669"}}>{fmtD(mort)}/mo</span>
+          </div>
+        </InputSection>
+
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+          <InputSection title="Income" accent="#10b981" defaultOpen badge={`${fmtD(c.effRent)}/mo`}>
+            <NF label="Monthly Rent" value={i.rent} onChange={sv("rent")} prefix="$" step={50}/>
+            <NF label="Other Income" value={i.otherIncome||0} onChange={sv("otherIncome")} prefix="$" step={25}/>
+          </InputSection>
+          <InputSection title="Growth" accent="#7c3aed" defaultOpen>
+            <NF label="Appreciation %" value={i.appreciation||3} onChange={sv("appreciation")} suffix="%" step={0.5}/>
+            <NF label="Rent Growth %" value={i.rentGrowth||2} onChange={sv("rentGrowth")} suffix="%" step={0.5}/>
+            <NF label="Exp. Inflation %" value={i.expenseGrowth||2} onChange={sv("expenseGrowth")} suffix="%" step={0.5}/>
+          </InputSection>
+        </div>
+
+        <InputSection title="Operating Expenses" accent="#6b7280" defaultOpen={false} badge={`${fmtD(totalExp)}/mo`}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:8}}>
+            {[["Taxes",sv("taxes"),i.taxes,25],["Insurance",sv("insurance"),i.insurance,10],["Vacancy",sv("vacancy"),i.vacancy,25],["Repairs",sv("repairs"),i.repairs,25],["CapEx",sv("capex"),i.capex,25],["Mgmt",sv("mgmt"),i.mgmt,25],["Utilities",sv("utilities"),i.utilities,25],["HOA",sv("hoa"),i.hoa,25]]
+            .map(([l,fn,v,s])=><NF key={l} label={l} value={v} onChange={fn} prefix="$" step={s}/>)}
+          </div>
+        </InputSection>
+      </div>
       {!hasData&&(
         <div style={{background:"linear-gradient(160deg,#0a0f1e 0%,#0f172a 60%,#1a2340 100%)",borderRadius:20,padding:"36px 24px",marginBottom:16,textAlign:"center"}}>
           <div style={{fontSize:40,marginBottom:16}}>🏘️</div>
@@ -1942,42 +1978,6 @@ function RentalCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro,al
         </div>
       </div>
 
-      {/* ══ INPUTS (full-width below verdict) ══════════════════════════════════ */}
-      <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:16}}>
-        <InputSection title="Acquisition" accent="#10b981" defaultOpen badge={`${fmtD(c.effPP)} · ${fmtD(mort)}/mo`}>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
-            <NF label="Purchase Price" value={i.pp} onChange={sv("pp")} prefix="$" step={5000}/>
-            <NF label="Down %" value={i.down} onChange={sv("down")} suffix="%" step={1}/>
-            <NF label="Rate %" value={i.rate} onChange={sv("rate")} suffix="%" step={0.125}/>
-            <NF label="Term" value={i.term} onChange={sv("term")} suffix="yr" step={5}/>
-            <NF label="Closing $" value={i.cc} onChange={sv("cc")} prefix="$" step={500}/>
-            <NF label="Rehab" value={i.rehab} onChange={sv("rehab")} prefix="$" step={1000}/>
-          </div>
-          <div style={{display:"flex",justifyContent:"space-between",padding:"7px 10px",background:"#f0fdf4",borderRadius:8,marginTop:6,border:"1px solid #bbf7d0"}}>
-            <span style={{fontSize:10,color:"#6b7280"}}>{fmtD(c.loan)} loan · {i.rate}% · {i.term}yr</span>
-            <span style={{fontSize:14,fontWeight:800,fontFamily:"'DM Mono',monospace",color:"#059669"}}>{fmtD(mort)}/mo</span>
-          </div>
-        </InputSection>
-
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-          <InputSection title="Income" accent="#10b981" defaultOpen badge={`${fmtD(c.effRent)}/mo`}>
-            <NF label="Monthly Rent" value={i.rent} onChange={sv("rent")} prefix="$" step={50}/>
-            <NF label="Other Income" value={i.otherIncome||0} onChange={sv("otherIncome")} prefix="$" step={25}/>
-          </InputSection>
-          <InputSection title="Growth" accent="#7c3aed" defaultOpen>
-            <NF label="Appreciation %" value={i.appreciation||3} onChange={sv("appreciation")} suffix="%" step={0.5}/>
-            <NF label="Rent Growth %" value={i.rentGrowth||2} onChange={sv("rentGrowth")} suffix="%" step={0.5}/>
-            <NF label="Exp. Inflation %" value={i.expenseGrowth||2} onChange={sv("expenseGrowth")} suffix="%" step={0.5}/>
-          </InputSection>
-        </div>
-
-        <InputSection title="Operating Expenses" accent="#6b7280" defaultOpen={false} badge={`${fmtD(totalExp)}/mo`}>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:8}}>
-            {[["Taxes",sv("taxes"),i.taxes,25],["Insurance",sv("insurance"),i.insurance,10],["Vacancy",sv("vacancy"),i.vacancy,25],["Repairs",sv("repairs"),i.repairs,25],["CapEx",sv("capex"),i.capex,25],["Mgmt",sv("mgmt"),i.mgmt,25],["Utilities",sv("utilities"),i.utilities,25],["HOA",sv("hoa"),i.hoa,25]]
-            .map(([l,fn,v,s])=><NF key={l} label={l} value={v} onChange={fn} prefix="$" step={s}/>)}
-          </div>
-        </InputSection>
-      </div>
 
       {/* ══════════════════════════════════════════════════════════════════════
           SECTION 2 — STABILITY (Survival Under Stress)
