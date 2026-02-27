@@ -1855,10 +1855,8 @@ function RentalCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro,al
 
       {/* ── Empty state ── */}
       {!hasData&&(
-        <div style={{background:"linear-gradient(160deg,#0a0f1e 0%,#0f172a 60%,#1a2340 100%)",borderRadius:20,padding:"36px 24px",marginBottom:16,textAlign:"center"}}>
-          <div style={{fontSize:40,marginBottom:16}}>🏘️</div>
-          <div style={{fontSize:18,fontWeight:800,color:"white",marginBottom:8}}>Enter your deal numbers</div>
-          <div style={{fontSize:13,color:"rgba(255,255,255,0.45)",lineHeight:1.7,maxWidth:320,margin:"0 auto"}}>Fill in Purchase Price and Monthly Rent to see your verdict, cash flow, DSCR, and full risk analysis.</div>
+        <div style={{background:"#f8fafc",border:"1.5px dashed #e5e7eb",borderRadius:12,padding:"16px 20px",marginBottom:12,textAlign:"center"}}>
+          <span style={{fontSize:12,color:"#9ca3af"}}>Fill in the fields below to see your analysis ↓</span>
         </div>
       )}
       {hasData&&<>
@@ -2564,12 +2562,10 @@ function WholesaleCalc({saved,onCalcChange,isPro:isProProp,onActivatePro}) {
   return (<>
     <AddressBar value={addr} onChange={setAddr}/>
     {!wsHasData&&(
-      <div style={{background:"linear-gradient(160deg,#0a0f1e 0%,#0f172a 60%,#1a2340 100%)",borderRadius:20,padding:"36px 24px",marginBottom:16,textAlign:"center"}}>
-        <div style={{fontSize:40,marginBottom:16}}>🏷️</div>
-        <div style={{fontSize:18,fontWeight:800,color:"white",marginBottom:8}}>Enter your deal numbers</div>
-        <div style={{fontSize:13,color:"rgba(255,255,255,0.45)",lineHeight:1.7,maxWidth:320,margin:"0 auto"}}>Enter the ARV, repairs, and your fee to calculate the Maximum Allowable Offer and deal risk score.</div>
-      </div>
-    )}
+        <div style={{background:"#f8fafc",border:"1.5px dashed #e5e7eb",borderRadius:12,padding:"16px 20px",marginBottom:12,textAlign:"center"}}>
+          <span style={{fontSize:12,color:"#9ca3af"}}>Fill in the fields below to see your analysis ↓</span>
+        </div>
+      )}
     {wsHasData&&<>
     {/* SECTION 1 — DEAL VERDICT */}
     <UniversalVerdictHeader
@@ -2908,12 +2904,10 @@ function FlipCalc({saved,onCalcChange,isPro:isProProp,onActivatePro}) {
   return (<>
     <AddressBar value={addr} onChange={setAddr}/>
     {!flipHasData&&(
-      <div style={{background:"linear-gradient(160deg,#0a0f1e 0%,#0f172a 60%,#1a2340 100%)",borderRadius:20,padding:"36px 24px",marginBottom:16,textAlign:"center"}}>
-        <div style={{fontSize:40,marginBottom:16}}>🔨</div>
-        <div style={{fontSize:18,fontWeight:800,color:"white",marginBottom:8}}>Enter your deal numbers</div>
-        <div style={{fontSize:13,color:"rgba(255,255,255,0.45)",lineHeight:1.7,maxWidth:320,margin:"0 auto"}}>Enter the ARV, purchase price, and rehab budget to analyze profit, ROI, and risk.</div>
-      </div>
-    )}
+        <div style={{background:"#f8fafc",border:"1.5px dashed #e5e7eb",borderRadius:12,padding:"16px 20px",marginBottom:12,textAlign:"center"}}>
+          <span style={{fontSize:12,color:"#9ca3af"}}>Fill in the fields below to see your analysis ↓</span>
+        </div>
+      )}
     {flipHasData&&<>
     {/* SECTION 1 — DEAL VERDICT */}
     <UniversalVerdictHeader
@@ -3215,12 +3209,10 @@ function BRRRRCalc({saved,onCalcChange,isPro:isProProp,onActivatePro}) {
   return (<>
     <AddressBar value={addr} onChange={setAddr}/>
     {!brrrrHasData&&(
-      <div style={{background:"linear-gradient(160deg,#0a0f1e 0%,#0f172a 60%,#1a2340 100%)",borderRadius:20,padding:"36px 24px",marginBottom:16,textAlign:"center"}}>
-        <div style={{fontSize:40,marginBottom:16}}>♻️</div>
-        <div style={{fontSize:18,fontWeight:800,color:"white",marginBottom:8}}>Enter your deal numbers</div>
-        <div style={{fontSize:13,color:"rgba(255,255,255,0.45)",lineHeight:1.7,maxWidth:320,margin:"0 auto"}}>Enter the purchase price, ARV, rehab, and rent to calculate capital recovery, post-refi cash flow, and BRRRR feasibility.</div>
-      </div>
-    )}
+        <div style={{background:"#f8fafc",border:"1.5px dashed #e5e7eb",borderRadius:12,padding:"16px 20px",marginBottom:12,textAlign:"center"}}>
+          <span style={{fontSize:12,color:"#9ca3af"}}>Fill in the fields below to see your analysis ↓</span>
+        </div>
+      )}
     {brrrrHasData&&<>
     {/* SECTION 1 — DEAL VERDICT */}
     <UniversalVerdictHeader
@@ -3552,12 +3544,10 @@ function SubToCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro}) {
   return (<>
     <AddressBar value={addr} onChange={setAddr}/>
     {!subtoHasData&&(
-      <div style={{background:"linear-gradient(160deg,#0a0f1e 0%,#0f172a 60%,#1a2340 100%)",borderRadius:20,padding:"36px 24px",marginBottom:16,textAlign:"center"}}>
-        <div style={{fontSize:40,marginBottom:16}}>📋</div>
-        <div style={{fontSize:18,fontWeight:800,color:"white",marginBottom:8}}>Enter your deal numbers</div>
-        <div style={{fontSize:13,color:"rgba(255,255,255,0.45)",lineHeight:1.7,maxWidth:320,margin:"0 auto"}}>Enter the existing loan balance, interest rate, monthly payment, and rent to analyze the rate arbitrage and cash flow.</div>
-      </div>
-    )}
+        <div style={{background:"#f8fafc",border:"1.5px dashed #e5e7eb",borderRadius:12,padding:"16px 20px",marginBottom:12,textAlign:"center"}}>
+          <span style={{fontSize:12,color:"#9ca3af"}}>Fill in the fields below to see your analysis ↓</span>
+        </div>
+      )}
     {subtoHasData&&<>
     {/* SECTION 1 — DEAL VERDICT */}
     <UniversalVerdictHeader
@@ -3852,12 +3842,10 @@ function NovationCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro}
   return (<>
     <AddressBar value={addr} onChange={setAddr}/>
     {!novHasData&&(
-      <div style={{background:"linear-gradient(160deg,#0a0f1e 0%,#0f172a 60%,#1a2340 100%)",borderRadius:20,padding:"36px 24px",marginBottom:16,textAlign:"center"}}>
-        <div style={{fontSize:40,marginBottom:16}}>🤝</div>
-        <div style={{fontSize:18,fontWeight:800,color:"white",marginBottom:8}}>Enter your deal numbers</div>
-        <div style={{fontSize:13,color:"rgba(255,255,255,0.45)",lineHeight:1.7,maxWidth:320,margin:"0 auto"}}>Enter the ARV, seller payout, repairs, and holding costs to analyze novation profit, timeline risk, and buyer execution.</div>
-      </div>
-    )}
+        <div style={{background:"#f8fafc",border:"1.5px dashed #e5e7eb",borderRadius:12,padding:"16px 20px",marginBottom:12,textAlign:"center"}}>
+          <span style={{fontSize:12,color:"#9ca3af"}}>Fill in the fields below to see your analysis ↓</span>
+        </div>
+      )}
     {novHasData&&<>
     {/* SECTION 1 — DEAL VERDICT */}
     <UniversalVerdictHeader
@@ -6657,7 +6645,6 @@ function LandingPage({onGoSignIn,onGoSignUp}) {
 
 // ─── Main Analyzer App ─────────────────────────────────────────────────────────
 const FREE_DEAL_LIMIT = 3;
-const PRO_DEAL_LIMIT  = Infinity;
 
 function AnalyzerApp({user,profile,onGoHome,onGoProfile,onSignOut}) {
   const [view,setView]=useState("calc");
@@ -6676,46 +6663,32 @@ function AnalyzerApp({user,profile,onGoHome,onGoProfile,onSignOut}) {
 
   useEffect(()=>{setIsPro(profile?.is_pro||false);},[profile]);
 
-  // ── Fetch saved deals on mount ──────────────────────────────────────────────
+  // Load saved deals on mount
   useEffect(()=>{
     if(!user?.id) return;
     setDealsLoading(true);
     supabase.getDeals(user.id)
-      .then(d=>{ setDeals(Array.isArray(d)?d:[]); })
-      .catch(()=>{ setDeals([]); })
-      .finally(()=>{ setDealsLoading(false); });
+      .then(d=>setDeals(Array.isArray(d)?d:[]))
+      .catch(()=>setDeals([]))
+      .finally(()=>setDealsLoading(false));
   },[user?.id]);
 
   const handleCalcChange=useCallback((inputs,metrics)=>{setCurrentInputs(inputs);setCurrentMetrics(metrics);},[]);
 
-  const dealLimit = isPro ? PRO_DEAL_LIMIT : FREE_DEAL_LIMIT;
+  const dealLimit = isPro ? Infinity : FREE_DEAL_LIMIT;
 
-  // ── Save deal with limit enforcement ───────────────────────────────────────
-  const handleSave=async(name)=>{
-    if(deals.length >= dealLimit){
-      setSaveLimitHit(true);
-      setShowSaveModal(false);
-      return;
-    }
-    const deal={user_id:user.id,name,mode,inputs:currentInputs,metrics:currentMetrics,created_at:new Date().toISOString()};
-    try{
-      const saved=await supabase.insertDeal(deal);
-      const nd=Array.isArray(saved)?saved[0]:{...deal,id:Date.now().toString()};
-      setDeals(p=>[nd,...p]);
-      setLoadedDealId(nd.id);
-    }catch{
-      const ld={...deal,id:Date.now().toString()};
-      setDeals(p=>[ld,...p]);
-      setLoadedDealId(ld.id);
-    }
-    setShowSaveModal(false);setSavedFlash(true);setTimeout(()=>setSavedFlash(false),2500);
-    try{await supabase.upsertProfile({id:user.id,deal_count:(deals.length+1)});}catch{}
+  const handleSaveClick=()=>{
+    if(deals.length>=dealLimit){ setSaveLimitHit(true); }
+    else{ setShowSaveModal(true); }
   };
 
-  // ── Open save modal — show limit modal instead if at cap ───────────────────
-  const handleSaveClick=()=>{
-    if(deals.length >= dealLimit){ setSaveLimitHit(true); }
-    else{ setShowSaveModal(true); }
+  const handleSave=async(name)=>{
+    if(deals.length>=dealLimit){ setShowSaveModal(false); setSaveLimitHit(true); return; }
+    const deal={user_id:user.id,name,mode,inputs:currentInputs,metrics:currentMetrics,created_at:new Date().toISOString()};
+    try{const saved=await supabase.insertDeal(deal);const nd=Array.isArray(saved)?saved[0]:{...deal,id:Date.now().toString()};setDeals(p=>[nd,...p]);setLoadedDealId(nd.id);}
+    catch{const ld={...deal,id:Date.now().toString()};setDeals(p=>[ld,...p]);setLoadedDealId(ld.id);}
+    setShowSaveModal(false);setSavedFlash(true);setTimeout(()=>setSavedFlash(false),2500);
+    try{await supabase.upsertProfile({id:user.id,deal_count:(deals.length+1)});}catch{}
   };
 
   const handleDelete=async(id)=>{try{await supabase.deleteDeal(id);}catch{}setDeals(p=>p.filter(d=>d.id!==id));if(loadedDealId===id)setLoadedDealId(null);};
@@ -6745,48 +6718,27 @@ function AnalyzerApp({user,profile,onGoHome,onGoProfile,onSignOut}) {
           <div onClick={e=>e.stopPropagation()} style={{background:"white",borderRadius:22,padding:0,maxWidth:420,width:"100%",boxShadow:"0 32px 80px rgba(0,0,0,0.2)",overflow:"hidden",animation:"popIn 0.2s cubic-bezier(0.34,1.56,0.64,1) both"}}>
             <div style={{background:"linear-gradient(135deg,#064e3b,#065f46)",padding:"28px 32px"}}>
               <div style={{fontSize:36,marginBottom:10}}>💾</div>
-              <h2 style={{fontFamily:"'Fraunces',serif",fontSize:21,fontWeight:800,color:"white",marginBottom:6}}>{isPro?"Deal Limit Reached":"Free Plan: 3 Deal Limit"}</h2>
-              <p style={{fontSize:13,color:"rgba(255,255,255,0.65)",lineHeight:1.6}}>
-                {isPro
-                  ? "Something went wrong — please try again or contact support."
-                  : `You've saved ${deals.length} of ${FREE_DEAL_LIMIT} free deals. Upgrade to Pro to save unlimited deals and never lose track of a deal again.`}
-              </p>
+              <h2 style={{fontFamily:"'Fraunces',serif",fontSize:21,fontWeight:800,color:"white",marginBottom:6}}>Free Plan: {FREE_DEAL_LIMIT}-Deal Limit</h2>
+              <p style={{fontSize:13,color:"rgba(255,255,255,0.65)",lineHeight:1.6}}>You've used all {FREE_DEAL_LIMIT} free deal saves. Upgrade to Pro for unlimited saves and advanced analytics.</p>
             </div>
             <div style={{padding:"22px 32px"}}>
-              {!isPro&&(
-                <div style={{display:"flex",flexDirection:"column",gap:9,marginBottom:20}}>
-                  {["♾️ Unlimited saved deals","📊 Capital Efficiency & Optimization","📈 30-year Wealth Projections","🧠 Decision Intelligence engine","📄 Auto-generated offer letters"].map(f=>(
-                    <div key={f} style={{display:"flex",alignItems:"center",gap:10,fontSize:13,color:"#374151"}}>
-                      <span style={{color:"#10b981",fontSize:13,flexShrink:0}}>✓</span>{f}
-                    </div>
-                  ))}
-                </div>
-              )}
+              <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:18}}>
+                {["♾️ Unlimited saved deals","📊 Capital Efficiency Analysis","📈 30-year Wealth Projections","🧠 Decision Intelligence (Monte Carlo)","📄 Auto-generated offer letters"].map(f=>(
+                  <div key={f} style={{display:"flex",alignItems:"center",gap:10,fontSize:13,color:"#374151"}}>
+                    <span style={{color:"#10b981",flexShrink:0}}>✓</span>{f}
+                  </div>
+                ))}
+              </div>
               <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14,padding:"12px 14px",background:"#f0fdf4",borderRadius:11,border:"1.5px solid #bbf7d0"}}>
                 <div><div style={{fontSize:13,fontWeight:700,color:"#374151"}}>DealSource Pro</div><div style={{fontSize:11,color:"#6b7280"}}>Cancel anytime</div></div>
                 <div><span style={{fontSize:24,fontWeight:800,fontFamily:"'DM Mono',monospace",color:"#059669"}}>$20</span><span style={{fontSize:12,color:"#6b7280"}}>/mo</span></div>
               </div>
-              {!isPro?(
-                <>
-                  <button onClick={async()=>{
-                    try{
-                      const res=await fetch("/api/create-checkout",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({userId:user.id,email:user.email||""})});
-                      const data=await res.json();
-                      if(data.url){window.location.href=data.url;}
-                    }catch{
-                      await supabase._fetch(`/rest/v1/profiles?id=eq.${user.id}`,{method:"PATCH",body:JSON.stringify({is_pro:true})}).catch(()=>{});
-                      setIsPro(true);setSaveLimitHit(false);
-                    }
-                  }} style={{width:"100%",padding:"13px",borderRadius:11,border:"none",background:"#10b981",color:"white",fontSize:15,fontWeight:700,cursor:"pointer",marginBottom:8,boxShadow:"0 4px 20px rgba(16,185,129,0.3)"}}>
-                    Upgrade to Pro — $20/mo →
-                  </button>
-                  <button onClick={()=>{setSaveLimitHit(false);setView("deals");}} style={{width:"100%",padding:"10px",borderRadius:11,border:"1.5px solid #e5e7eb",background:"white",color:"#6b7280",fontSize:13,cursor:"pointer"}}>
-                    Manage my {FREE_DEAL_LIMIT} saved deals
-                  </button>
-                </>
-              ):(
-                <button onClick={()=>setSaveLimitHit(false)} style={{width:"100%",padding:"13px",borderRadius:11,border:"1.5px solid #e5e7eb",background:"white",color:"#374151",fontSize:14,fontWeight:600,cursor:"pointer"}}>Close</button>
-              )}
+              <button onClick={async()=>{try{const r=await fetch("/api/create-checkout",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({userId:user.id,email:user.email||""})});const d=await r.json();if(d.url)window.location.href=d.url;}catch{setIsPro(true);setSaveLimitHit(false);}}} style={{width:"100%",padding:"13px",borderRadius:11,border:"none",background:"#10b981",color:"white",fontSize:15,fontWeight:700,cursor:"pointer",marginBottom:8,boxShadow:"0 4px 20px rgba(16,185,129,0.3)"}}>
+                Upgrade to Pro — $20/mo →
+              </button>
+              <button onClick={()=>{setSaveLimitHit(false);setView("deals");}} style={{width:"100%",padding:"10px",borderRadius:11,border:"1.5px solid #e5e7eb",background:"white",color:"#6b7280",fontSize:13,cursor:"pointer"}}>
+                Manage my {FREE_DEAL_LIMIT} saved deals →
+              </button>
             </div>
           </div>
         </div>
@@ -6859,17 +6811,16 @@ function AnalyzerApp({user,profile,onGoHome,onGoProfile,onSignOut}) {
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:22,flexWrap:"wrap",gap:14}}>
             <div>
               <h2 style={{fontFamily:"'Fraunces',serif",fontSize:24,fontWeight:800,color:"#111827",marginBottom:4}}>Saved Deals</h2>
-              {isPro?(
-                <p style={{fontSize:13,color:"#9ca3af"}}>{deals.length} deal{deals.length!==1?"s":""} · <span style={{color:"#059669",fontWeight:600}}>Pro — unlimited</span></p>
-              ):(
-                <div style={{display:"flex",alignItems:"center",gap:10}}>
-                  <p style={{fontSize:13,color:"#9ca3af"}}>{deals.length} of {FREE_DEAL_LIMIT} free deals used</p>
-                  <div style={{width:80,height:5,background:"#e5e7eb",borderRadius:3,overflow:"hidden"}}>
-                    <div style={{height:"100%",width:`${Math.min(100,(deals.length/FREE_DEAL_LIMIT)*100)}%`,background:deals.length>=FREE_DEAL_LIMIT?"#dc2626":"#10b981",borderRadius:3,transition:"width 0.3s"}}/>
+              {isPro
+                ? <p style={{fontSize:13,color:"#9ca3af"}}>{deals.length} deal{deals.length!==1?"s":""} · <span style={{color:"#059669",fontWeight:600}}>Pro — unlimited</span></p>
+                : <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+                    <p style={{fontSize:13,color:"#9ca3af",margin:0}}>{deals.length} of {FREE_DEAL_LIMIT} free saves used</p>
+                    <div style={{width:80,height:5,background:"#e5e7eb",borderRadius:3,overflow:"hidden"}}>
+                      <div style={{height:"100%",width:(Math.min(1,deals.length/FREE_DEAL_LIMIT)*100)+"%",background:deals.length>=FREE_DEAL_LIMIT?"#dc2626":"#10b981",borderRadius:3}}/>
+                    </div>
+                    {deals.length>=FREE_DEAL_LIMIT&&<button onClick={()=>setSaveLimitHit(true)} style={{fontSize:11,fontWeight:700,color:"#059669",background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:100,padding:"2px 9px",cursor:"pointer"}}>Upgrade →</button>}
                   </div>
-                  {deals.length>=FREE_DEAL_LIMIT&&<button onClick={()=>setSaveLimitHit(true)} style={{fontSize:11,fontWeight:700,color:"#059669",background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:100,padding:"2px 9px",cursor:"pointer"}}>Upgrade →</button>}
-                </div>
-              )}
+              }
             </div>
             <Btn variant="primary" onClick={()=>setView("calc")}>⚡ New Analysis</Btn>
           </div>
