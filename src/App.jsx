@@ -228,8 +228,24 @@ function SignInPage({onSignIn,onGoSignUp,onGoHome}) {
   const handle=async()=>{
     if(!email||!pw){setErr("Please fill in all fields.");return;}
     setLoading(true);setErr("");
-    try{const d=await supabase.auth.signIn(email,pw);const p=await supabase.getProfile(d.user.id);onSignIn(d.user,p);}
-    catch(e){setErr(e.message||"Sign in failed.");}finally{setLoading(false);}
+    try{
+      const d=await supabase.auth.signIn(email,pw);
+      const user=d.user||d;
+      if(!user?.id) throw new Error("Sign in failed — no user returned.");
+      const p=await supabase.getProfile(user.id).catch(()=>null);
+      onSignIn(user,p);
+    }
+    catch(e){
+      const msg=e.message||"";
+      if(msg.includes("Invalid login")||msg.includes("invalid_grant")||msg.includes("password")){
+        setErr("Incorrect email or password. Please try again.");
+      } else if(msg.includes("Email not confirmed")){
+        setErr("Please confirm your email address before signing in. Check your inbox.");
+      } else {
+        setErr(msg||"Sign in failed. Please try again.");
+      }
+    }
+    finally{setLoading(false);}
   };
   return (
     <AuthLayout title="Welcome back" subtitle="Sign in to your DealSource.ai account.">
@@ -249,28 +265,138 @@ function SignInPage({onSignIn,onGoSignUp,onGoHome}) {
 }
 
 // ─── Sign Up ───────────────────────────────────────────────────────────────────
+function LocationInput({value, onChange}) {
+  const [suggestions, setSuggestions] = useState([]);
+  const [open, setOpen] = useState(false);
+  const debounceRef = useRef(null);
+
+  const search = (q) => {
+    onChange(q);
+    if(q.length < 3){ setSuggestions([]); setOpen(false); return; }
+    clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(async()=>{
+      try {
+        const res = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&addressdetails=1&limit=6&countrycodes=us&featuretype=city,town,state`);
+        const data = await res.json();
+        setSuggestions(data||[]);
+        setOpen((data||[]).length>0);
+      } catch { setSuggestions([]); }
+    }, 350);
+  };
+
+  const select = (item) => {
+    // Build clean "City, ST" format
+    const addr = item.address;
+    const city = addr?.city||addr?.town||addr?.village||addr?.county||"";
+    const state = addr?.state||"";
+    const label = [city,state].filter(Boolean).join(", ")||item.display_name?.split(",").slice(0,2).join(",").trim();
+    onChange(label);
+    setOpen(false);
+    setSuggestions([]);
+  };
+
+  return (
+    <div style={{position:"relative"}}>
+      <div style={{display:"flex",alignItems:"center",gap:10,padding:"11px 14px",background:"white",border:"1.5px solid #e5e7eb",borderRadius:10}}>
+        <span style={{fontSize:14}}>📍</span>
+        <input type="text" value={value} onChange={e=>search(e.target.value)}
+          onBlur={()=>setTimeout(()=>setOpen(false),200)}
+          onFocus={()=>suggestions.length>0&&setOpen(true)}
+          placeholder="City, State (e.g. Atlanta, GA)"
+          style={{flex:1,background:"transparent",border:"none",outline:"none",fontSize:14,color:"#111827",fontFamily:"'DM Sans',sans-serif"}}/>
+        {value&&<button onClick={()=>{onChange("");setSuggestions([]);}} style={{background:"none",border:"none",color:"#9ca3af",cursor:"pointer",padding:0}}>✕</button>}
+      </div>
+      {open&&suggestions.length>0&&(
+        <div style={{position:"absolute",top:"100%",left:0,right:0,background:"white",border:"1.5px solid #e5e7eb",borderRadius:10,boxShadow:"0 8px 24px rgba(0,0,0,0.1)",zIndex:300,marginTop:4,overflow:"hidden"}}>
+          {suggestions.slice(0,5).map((s,i)=>{
+            const addr=s.address;
+            const city=addr?.city||addr?.town||addr?.village||addr?.county||"";
+            const state=addr?.state||"";
+            const label=[city,state].filter(Boolean).join(", ")||s.display_name?.split(",").slice(0,2).join(",").trim();
+            return (
+              <button key={i} onMouseDown={()=>select(s)}
+                style={{width:"100%",padding:"10px 14px",textAlign:"left",background:"none",border:"none",borderBottom:i<suggestions.slice(0,5).length-1?"1px solid #f3f4f6":"none",cursor:"pointer",fontSize:13,color:"#374151",lineHeight:1.4}}
+                onMouseEnter={e=>e.currentTarget.style.background="#f0fdf4"}
+                onMouseLeave={e=>e.currentTarget.style.background="none"}>
+                📍 {label}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SignUpPage({onSignIn,onGoSignIn,onGoHome}) {
   const [step,setStep]=useState(1);
   const [form,setForm]=useState({email:"",password:"",confirm:"",full_name:"",phone:"",location:"",investor_type:"",bio:"",title:""});
+  const [skipPhone,setSkipPhone]=useState(false);
   const [loading,setLoading]=useState(false);const [err,setErr]=useState("");
   const f=k=>v=>setForm(p=>({...p,[k]:v}));
+
   const step1=()=>{
     if(!form.email||!form.password||!form.confirm){setErr("Fill in all fields.");return;}
     if(form.password.length<8){setErr("Password must be 8+ chars.");return;}
     if(form.password!==form.confirm){setErr("Passwords don't match.");return;}
+    if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)){setErr("Please enter a valid email.");return;}
     setErr("");setStep(2);
   };
+
   const submit=async()=>{
-    if(!form.full_name){setErr("Name is required.");return;}
+    if(!form.full_name.trim()){setErr("Full name is required.");return;}
+    if(!skipPhone&&form.phone&&!/^\+?[\d\s\-().]{7,}$/.test(form.phone)){setErr("Enter a valid phone number or skip it.");return;}
     setLoading(true);setErr("");
     try{
+      // 1. Create auth user
       const d=await supabase.auth.signUp(form.email,form.password,{full_name:form.full_name});
       const uid=d.user?.id||d.id;
-      const profile={id:uid,email:form.email,full_name:form.full_name,phone:form.phone,location:form.location,investor_type:form.investor_type,bio:form.bio,title:form.title,portfolio_value:0,portfolio_public:false,is_verified:false,mentoring_enabled:false,deal_count:0,upvotes_received:0,mentoring_sessions:0};
-      await supabase.upsertProfile(profile).catch(()=>{});
-      onSignIn(d.user||d,profile);
-    }catch(e){setErr(e.message||"Sign up failed.");setStep(1);}finally{setLoading(false);}
+      if(!uid) throw new Error("Account creation failed — no user ID returned. Please try again.");
+
+      // 2. Persist token immediately so profile upsert is authenticated
+      if(d.access_token){
+        supabase._token=d.access_token;
+        try{localStorage.setItem("ds_token",d.access_token);}catch{}
+      }
+
+      // 3. Save profile (non-blocking — don't fail signup if this fails)
+      const profile={
+        id:uid,
+        email:form.email,
+        full_name:form.full_name.trim(),
+        phone:skipPhone?"":form.phone,
+        location:form.location,
+        investor_type:form.investor_type,
+        bio:form.bio,
+        title:form.title,
+        portfolio_value:0,
+        portfolio_public:false,
+        is_verified:false,
+        mentoring_enabled:false,
+        deal_count:0,
+        upvotes_received:0,
+        mentoring_sessions:0,
+      };
+      await supabase.upsertProfile(profile).catch(()=>{
+        // Profile save failed (e.g. email confirmation required) — continue anyway
+        console.warn("Profile upsert failed, will retry on next login");
+      });
+
+      onSignIn(d.user||d, profile);
+    }catch(e){
+      const msg=e.message||"";
+      if(msg.includes("already registered")||msg.includes("already exists")){
+        setErr("An account with this email already exists. Try signing in instead.");
+      } else if(msg.includes("email")){
+        setErr("Invalid email address. Please check and try again.");
+        setStep(1);
+      } else {
+        setErr(msg||"Sign up failed. Please try again.");
+      }
+      setStep(1);
+    }finally{setLoading(false);}
   };
+
   return (
     <AuthLayout title={step===1?"Create your account":"Complete your profile"} subtitle={step===1?"Free trial — no credit card required.":"Tell us about your investing background."}>
       <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:24}}>
@@ -291,17 +417,43 @@ function SignUpPage({onSignIn,onGoSignIn,onGoHome}) {
         {step===2&&(<>
           <Input label="Full name *" value={form.full_name} onChange={f("full_name")} placeholder="Jane Smith" icon="👤"/>
           <Input label="Professional title" value={form.title} onChange={f("title")} placeholder="e.g. Managing Partner, Investor" icon="💼"/>
-          <Input label="Phone" value={form.phone} onChange={f("phone")} placeholder="+1 (555) 000-0000" icon="📱"/>
-          <Input label="Location" value={form.location} onChange={f("location")} placeholder="Atlanta, GA" icon="📍"/>
+
+          {/* Phone — optional with skip toggle */}
+          <div style={{display:"flex",flexDirection:"column",gap:6}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+              <label style={{fontSize:12,fontWeight:600,color:"#374151"}}>📱 Phone <span style={{color:"#9ca3af",fontWeight:400}}>(optional)</span></label>
+              <button onClick={()=>{setSkipPhone(s=>!s);if(!skipPhone)f("phone")("");}}
+                style={{background:"none",border:"none",fontSize:11,color:skipPhone?"#9ca3af":"#059669",fontWeight:600,cursor:"pointer",padding:0}}>
+                {skipPhone?"+ Add phone":"Skip for now"}
+              </button>
+            </div>
+            {!skipPhone&&(
+              <div style={{display:"flex",alignItems:"center",gap:10,padding:"11px 14px",background:"white",border:"1.5px solid #e5e7eb",borderRadius:10}}>
+                <span style={{fontSize:14}}>📱</span>
+                <input type="tel" value={form.phone} onChange={e=>f("phone")(e.target.value)}
+                  placeholder="+1 (555) 000-0000"
+                  style={{flex:1,background:"transparent",border:"none",outline:"none",fontSize:14,color:"#111827",fontFamily:"'DM Sans',sans-serif"}}/>
+              </div>
+            )}
+            {skipPhone&&<div style={{padding:"8px 12px",background:"#f9fafb",borderRadius:8,fontSize:11,color:"#9ca3af"}}>Phone skipped — you can add it later in your profile settings.</div>}
+          </div>
+
+          {/* Location with autocomplete */}
+          <div style={{display:"flex",flexDirection:"column",gap:6}}>
+            <label style={{fontSize:12,fontWeight:600,color:"#374151"}}>📍 Location <span style={{color:"#9ca3af",fontWeight:400}}>(optional)</span></label>
+            <LocationInput value={form.location} onChange={f("location")}/>
+          </div>
+
           <Sel label="Investor type" value={form.investor_type} onChange={f("investor_type")} options={INVESTOR_TYPES} placeholder="What kind of investor?"/>
           <div style={{display:"flex",flexDirection:"column",gap:5}}>
-            <label style={{fontSize:12,fontWeight:600,color:"#374151"}}>Bio</label>
-            <textarea value={form.bio} onChange={e=>f("bio")(e.target.value)} placeholder="Your investing background..." rows={3} style={{padding:"11px 14px",borderRadius:10,border:"1.5px solid #e5e7eb",fontSize:14,color:"#111827",outline:"none",resize:"vertical",fontFamily:"'DM Sans',sans-serif"}}/>
+            <label style={{fontSize:12,fontWeight:600,color:"#374151"}}>Bio <span style={{color:"#9ca3af",fontWeight:400}}>(optional)</span></label>
+            <textarea value={form.bio} onChange={e=>f("bio")(e.target.value)} placeholder="Your investing background, goals, markets you work in..." rows={3} style={{padding:"11px 14px",borderRadius:10,border:"1.5px solid #e5e7eb",fontSize:14,color:"#111827",outline:"none",resize:"vertical",fontFamily:"'DM Sans',sans-serif"}}/>
           </div>
           <div style={{display:"flex",gap:10}}>
             <Btn variant="ghost" onClick={()=>{setErr("");setStep(1);}}>← Back</Btn>
             <Btn variant="primary" fullWidth loading={loading} onClick={submit}>Create Account →</Btn>
           </div>
+          <p style={{fontSize:11,color:"#9ca3af",textAlign:"center",margin:0}}>Profile info can be updated anytime in settings.</p>
         </>)}
         <div style={{textAlign:"center",paddingTop:8,borderTop:"1px solid #f3f4f6"}}>
           <span style={{fontSize:13,color:"#6b7280"}}>Have an account? </span>
@@ -350,64 +502,116 @@ function AddressBar({value, onChange, onDataFill}) {
   const [suggestions, setSuggestions] = useState([]);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [selected, setSelected] = useState(false);
   const debounceRef = useRef(null);
+
+  // Build a clean human-readable label from Nominatim address data
+  const buildLabel = (item) => {
+    const a = item.address || {};
+    const parts = [
+      a.house_number && a.road ? `${a.house_number} ${a.road}` : a.road || "",
+      a.city || a.town || a.village || a.suburb || "",
+      a.state || "",
+      a.postcode || "",
+    ].filter(Boolean);
+    return parts.join(", ") || item.display_name?.split(",").slice(0,3).join(",").trim() || "";
+  };
 
   const search = (q) => {
     onChange(q);
-    if(q.length < 4){ setSuggestions([]); setOpen(false); return; }
+    setSelected(false);
+    if(q.length < 3){ setSuggestions([]); setOpen(false); return; }
     clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(async()=>{
       setLoading(true);
       try {
-        // Use Nominatim (free, no API key needed)
-        const res = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&addressdetails=1&limit=5&countrycodes=us`);
+        const res = await fetch(
+          `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&addressdetails=1&limit=6&countrycodes=us`,
+          { headers: { "Accept-Language": "en-US" } }
+        );
         const data = await res.json();
-        setSuggestions(data||[]);
-        setOpen(data?.length>0);
+        setSuggestions(data || []);
+        setOpen((data || []).length > 0);
       } catch { setSuggestions([]); }
       setLoading(false);
-    }, 400);
+    }, 380);
   };
 
   const select = (item) => {
-    const addr = item.display_name?.split(",").slice(0,3).join(",").trim();
-    onChange(addr);
+    const label = buildLabel(item);
+    onChange(label);
     setOpen(false);
     setSuggestions([]);
-    // Pass back address data if parent wants to auto-fill
-    if(onDataFill && item.address) {
+    setSelected(true);
+    // Fire onDataFill so parent can auto-populate city/state/zip fields
+    if(onDataFill) {
+      const a = item.address || {};
       onDataFill({
-        city: item.address.city||item.address.town||item.address.village||"",
-        state: item.address.state||"",
-        zip: item.address.postcode||"",
-        county: item.address.county||"",
-        lat: item.lat,
-        lon: item.lon,
+        fullAddress: label,
+        city:  a.city || a.town || a.village || a.suburb || "",
+        state: a.state || "",
+        zip:   a.postcode || "",
+        county: a.county || "",
+        lat:   parseFloat(item.lat) || null,
+        lon:   parseFloat(item.lon) || null,
       });
     }
   };
 
   return (
-    <div style={{marginBottom:18,position:"relative"}}>
-      <div style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",background:"#f0fdf4",border:"1.5px solid #bbf7d0",borderRadius:10}}>
-        <span style={{fontSize:16}}>{loading?"⏳":"📍"}</span>
-        <input type="text" value={value} onChange={e=>search(e.target.value)}
+    <div style={{marginBottom:14,position:"relative"}}>
+      <div style={{
+        display:"flex",alignItems:"center",gap:10,padding:"10px 14px",
+        background: selected ? "#f0fdf4" : "white",
+        border: selected ? "1.5px solid #6ee7b7" : "1.5px solid #e5e7eb",
+        borderRadius:10,transition:"all 0.2s"
+      }}>
+        <span style={{fontSize:15,minWidth:18,textAlign:"center"}}>
+          {loading ? "⏳" : selected ? "✅" : "📍"}
+        </span>
+        <input
+          type="text"
+          value={value}
+          onChange={e=>search(e.target.value)}
           onBlur={()=>setTimeout(()=>setOpen(false),200)}
-          onFocus={()=>suggestions.length>0&&setOpen(true)}
-          placeholder="Enter property address (optional)..."
-          style={{flex:1,background:"transparent",border:"none",outline:"none",fontSize:13,color:"#111827",fontFamily:"'DM Sans',sans-serif"}}/>
-        {value&&<button onClick={()=>{onChange("");setSuggestions([]);}} style={{background:"none",border:"none",color:"#9ca3af",cursor:"pointer",fontSize:14,padding:0}}>✕</button>}
+          onFocus={()=>value.length>=3&&suggestions.length>0&&setOpen(true)}
+          placeholder="Enter property address to auto-fill location..."
+          style={{flex:1,background:"transparent",border:"none",outline:"none",fontSize:13,color:"#111827",fontFamily:"'DM Sans',sans-serif"}}
+        />
+        {value && (
+          <button onClick={()=>{onChange("");setSuggestions([]);setSelected(false);}}
+            style={{background:"none",border:"none",color:"#9ca3af",cursor:"pointer",fontSize:14,padding:0,lineHeight:1}}>
+            ✕
+          </button>
+        )}
       </div>
-      {open&&suggestions.length>0&&(
-        <div style={{position:"absolute",top:"100%",left:0,right:0,background:"white",border:"1.5px solid #e5e7eb",borderRadius:10,boxShadow:"0 8px 24px rgba(0,0,0,0.1)",zIndex:200,marginTop:4,overflow:"hidden"}}>
-          {suggestions.map((s,i)=>(
-            <button key={i} onMouseDown={()=>select(s)}
-              style={{width:"100%",padding:"10px 14px",textAlign:"left",background:"none",border:"none",borderBottom:i<suggestions.length-1?"1px solid #f3f4f6":"none",cursor:"pointer",fontSize:12,color:"#374151",lineHeight:1.4}}
-              onMouseEnter={e=>e.currentTarget.style.background="#f0fdf4"}
-              onMouseLeave={e=>e.currentTarget.style.background="none"}>
-              📍 {s.display_name?.split(",").slice(0,4).join(",")}
-            </button>
-          ))}
+      {open && suggestions.length > 0 && (
+        <div style={{
+          position:"absolute",top:"calc(100% + 4px)",left:0,right:0,
+          background:"white",border:"1.5px solid #e5e7eb",borderRadius:10,
+          boxShadow:"0 8px 28px rgba(0,0,0,0.12)",zIndex:500,overflow:"hidden"
+        }}>
+          {suggestions.map((s,i) => {
+            const label = buildLabel(s);
+            const a = s.address || {};
+            const city = a.city||a.town||a.village||a.suburb||"";
+            const state = a.state||"";
+            const zip = a.postcode||"";
+            const sub = [city,state,zip].filter(Boolean).join(" · ");
+            return (
+              <button key={i} onMouseDown={()=>select(s)}
+                style={{
+                  width:"100%",padding:"10px 14px",textAlign:"left",background:"none",
+                  border:"none",borderBottom:i<suggestions.length-1?"1px solid #f3f4f6":"none",
+                  cursor:"pointer",lineHeight:1.3
+                }}
+                onMouseEnter={e=>e.currentTarget.style.background="#f0fdf4"}
+                onMouseLeave={e=>e.currentTarget.style.background="none"}>
+                <div style={{fontSize:13,color:"#111827",fontWeight:500}}>📍 {label}</div>
+                {sub && <div style={{fontSize:11,color:"#9ca3af",marginTop:2}}>{sub}</div>}
+              </button>
+            );
+          })}
         </div>
       )}
     </div>
@@ -1854,7 +2058,7 @@ function RentalCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro,al
 
   return(
     <div style={{display:"flex",flexDirection:"column",gap:0,width:"100%",boxSizing:"border-box"}}>
-      <AddressBar value={addr} onChange={setAddr}/>
+      <AddressBar value={addr} onChange={setAddr} onDataFill={d=>{if(d.fullAddress)setAddr(d.fullAddress);}}/>
 
 
             {/* ══════════════════════════════════════════════════════════════════════
@@ -2555,7 +2759,7 @@ function WholesaleCalc({saved,onCalcChange,isPro:isProProp,onActivatePro}) {
   const wsHasData = +i.arv > 0;
 
   return (<>
-    <AddressBar value={addr} onChange={setAddr}/>
+    <AddressBar value={addr} onChange={setAddr} onDataFill={d=>{if(d.fullAddress)setAddr(d.fullAddress);}}/>
             {/* SECTION 1 — DEAL VERDICT */}
     <UniversalVerdictHeader
       verdict={wsRisk.verdict}
@@ -2889,7 +3093,7 @@ function FlipCalc({saved,onCalcChange,isPro:isProProp,onActivatePro}) {
   const flipHasData = +i.arv > 0 && +i.pp > 0;
 
   return (<>
-    <AddressBar value={addr} onChange={setAddr}/>
+    <AddressBar value={addr} onChange={setAddr} onDataFill={d=>{if(d.fullAddress)setAddr(d.fullAddress);}}/>
             {/* SECTION 1 — DEAL VERDICT */}
     <UniversalVerdictHeader
       verdict={flipRisk.verdict}
@@ -3186,7 +3390,7 @@ function BRRRRCalc({saved,onCalcChange,isPro:isProProp,onActivatePro}) {
   const brrrrHasData = +i.arv > 0 && +i.pp > 0;
 
   return (<>
-    <AddressBar value={addr} onChange={setAddr}/>
+    <AddressBar value={addr} onChange={setAddr} onDataFill={d=>{if(d.fullAddress)setAddr(d.fullAddress);}}/>
             {/* SECTION 1 — DEAL VERDICT */}
     <UniversalVerdictHeader
       verdict={brrrRisk.verdict}
@@ -3514,7 +3718,7 @@ function SubToCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro}) {
   const subtoHasData = +i.existingBalance > 0 && +i.rent > 0;
 
   return (<>
-    <AddressBar value={addr} onChange={setAddr}/>
+    <AddressBar value={addr} onChange={setAddr} onDataFill={d=>{if(d.fullAddress)setAddr(d.fullAddress);}}/>
             {/* SECTION 1 — DEAL VERDICT */}
     <UniversalVerdictHeader
       verdict={subtoRisk.verdict}
@@ -3804,7 +4008,7 @@ function NovationCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro}
   const novHasData = +i.arv > 0 && +i.sellerPayout > 0;
 
   return (<>
-    <AddressBar value={addr} onChange={setAddr}/>
+    <AddressBar value={addr} onChange={setAddr} onDataFill={d=>{if(d.fullAddress)setAddr(d.fullAddress);}}/>
             {/* SECTION 1 — DEAL VERDICT */}
     <UniversalVerdictHeader
       verdict={novRisk.verdict}
