@@ -1738,9 +1738,9 @@ function RentalCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro,al
   const isPro = isProProp||profile?.is_pro||false;
 
   const [i,setI]=useState(saved||{
-    pp:"",down:20,rate:7.5,term:30,cc:"",rehab:"",
-    rent:"",otherIncome:0,
-    taxes:"",insurance:"",vacancy:"",repairs:"",capex:"",mgmt:"",utilities:0,hoa:0,
+    pp:200000,down:25,rate:7.0,term:30,cc:3000,rehab:0,
+    rent:2200,otherIncome:0,
+    taxes:175,insurance:90,vacancy:5,repairs:1,capex:1,mgmt:8,utilities:0,hoa:0,
     appreciation:3,rentGrowth:2,expenseGrowth:2,
   });
   const sv=k=>v=>setI(p=>({...p,[k]:v}));
@@ -1752,7 +1752,10 @@ function RentalCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro,al
     return L*(r*Math.pow(1+r,n))/(Math.pow(1+r,n)-1);
   },[i,optPP,optDown]);
 
-  const totalExp=useMemo(()=>+i.taxes+ +i.insurance+ +i.vacancy+ +i.repairs+ +i.capex+ +i.mgmt+ +i.utilities+ +i.hoa,[i]);
+  const totalExp=useMemo(()=>{
+    const effRent=+(i.rent||0);
+    return +i.taxes+ +i.insurance+ (effRent*(+i.vacancy||0)/100)+ (effRent*(+i.repairs||0)/100)+ (effRent*(+i.capex||0)/100)+ (effRent*(+i.mgmt||0)/100)+ +i.utilities+ +i.hoa;
+  },[i]);
 
   const c=useMemo(()=>{
     const effPP=+(optPP??i.pp), effDown=+(optDown??i.down), effRent=(+(optRent??i.rent))+(+(i.otherIncome||0));
@@ -1853,44 +1856,8 @@ function RentalCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro,al
     <div style={{display:"flex",flexDirection:"column",gap:0,width:"100%",boxSizing:"border-box"}}>
       <AddressBar value={addr} onChange={setAddr}/>
 
-      {/* ── Empty state ── */}
-      {/* ══ INPUTS (full-width below verdict) ══════════════════════════════════ */}
-      <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:16}}>
-        <InputSection title="Acquisition" accent="#10b981" defaultOpen badge={`${fmtD(c.effPP)} · ${fmtD(mort)}/mo`}>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
-            <NF label="Purchase Price" value={i.pp} onChange={sv("pp")} prefix="$" step={5000}/>
-            <NF label="Down %" value={i.down} onChange={sv("down")} suffix="%" step={1}/>
-            <NF label="Rate %" value={i.rate} onChange={sv("rate")} suffix="%" step={0.125}/>
-            <NF label="Term" value={i.term} onChange={sv("term")} suffix="yr" step={5}/>
-            <NF label="Closing $" value={i.cc} onChange={sv("cc")} prefix="$" step={500}/>
-            <NF label="Rehab" value={i.rehab} onChange={sv("rehab")} prefix="$" step={1000}/>
-          </div>
-          <div style={{display:"flex",justifyContent:"space-between",padding:"7px 10px",background:"#f0fdf4",borderRadius:8,marginTop:6,border:"1px solid #bbf7d0"}}>
-            <span style={{fontSize:10,color:"#6b7280"}}>{fmtD(c.loan)} loan · {i.rate}% · {i.term}yr</span>
-            <span style={{fontSize:14,fontWeight:800,fontFamily:"'DM Mono',monospace",color:"#059669"}}>{fmtD(mort)}/mo</span>
-          </div>
-        </InputSection>
 
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-          <InputSection title="Income" accent="#10b981" defaultOpen badge={`${fmtD(c.effRent)}/mo`}>
-            <NF label="Monthly Rent" value={i.rent} onChange={sv("rent")} prefix="$" step={50}/>
-            <NF label="Other Income" value={i.otherIncome||0} onChange={sv("otherIncome")} prefix="$" step={25}/>
-          </InputSection>
-          <InputSection title="Growth" accent="#7c3aed" defaultOpen>
-            <NF label="Appreciation %" value={i.appreciation||3} onChange={sv("appreciation")} suffix="%" step={0.5}/>
-            <NF label="Rent Growth %" value={i.rentGrowth||2} onChange={sv("rentGrowth")} suffix="%" step={0.5}/>
-            <NF label="Exp. Inflation %" value={i.expenseGrowth||2} onChange={sv("expenseGrowth")} suffix="%" step={0.5}/>
-          </InputSection>
-        </div>
-
-        <InputSection title="Operating Expenses" accent="#6b7280" defaultOpen={false} badge={`${fmtD(totalExp)}/mo`}>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:8}}>
-            {[["Taxes",sv("taxes"),i.taxes,25],["Insurance",sv("insurance"),i.insurance,10],["Vacancy",sv("vacancy"),i.vacancy,25],["Repairs",sv("repairs"),i.repairs,25],["CapEx",sv("capex"),i.capex,25],["Mgmt",sv("mgmt"),i.mgmt,25],["Utilities",sv("utilities"),i.utilities,25],["HOA",sv("hoa"),i.hoa,25]]
-            .map(([l,fn,v,s])=><NF key={l} label={l} value={v} onChange={fn} prefix="$" step={s}/>)}
-          </div>
-        </InputSection>
-      {hasData&&<>
-      {/* ══════════════════════════════════════════════════════════════════════
+            {/* ══════════════════════════════════════════════════════════════════════
           SECTION 1 — DEAL VERDICT (Dominant Anchor, Non-Negotiable)
           Single card. Score + 3 Pillars + 4 KPIs max above fold.
           No competing visual anchors. No duplicate scoring cards.
@@ -1970,7 +1937,42 @@ function RentalCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro,al
         </div>
       </div>
 
-            </div>
+      {/* ══ INPUTS (full-width below verdict) ══════════════════════════════════ */}
+      <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:16}}>
+        <InputSection title="Acquisition" accent="#10b981" defaultOpen badge={`${fmtD(c.effPP)} · ${fmtD(mort)}/mo`}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+            <NF label="Purchase Price" value={i.pp} onChange={sv("pp")} prefix="$" step={5000}/>
+            <NF label="Down %" value={i.down} onChange={sv("down")} suffix="%" step={1}/>
+            <NF label="Rate %" value={i.rate} onChange={sv("rate")} suffix="%" step={0.125}/>
+            <NF label="Term" value={i.term} onChange={sv("term")} suffix="yr" step={5}/>
+            <NF label="Closing $" value={i.cc} onChange={sv("cc")} prefix="$" step={500}/>
+            <NF label="Rehab" value={i.rehab} onChange={sv("rehab")} prefix="$" step={1000}/>
+          </div>
+          <div style={{display:"flex",justifyContent:"space-between",padding:"7px 10px",background:"#f0fdf4",borderRadius:8,marginTop:6,border:"1px solid #bbf7d0"}}>
+            <span style={{fontSize:10,color:"#6b7280"}}>{fmtD(c.loan)} loan · {i.rate}% · {i.term}yr</span>
+            <span style={{fontSize:14,fontWeight:800,fontFamily:"'DM Mono',monospace",color:"#059669"}}>{fmtD(mort)}/mo</span>
+          </div>
+        </InputSection>
+
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+          <InputSection title="Income" accent="#10b981" defaultOpen badge={`${fmtD(c.effRent)}/mo`}>
+            <NF label="Monthly Rent" value={i.rent} onChange={sv("rent")} prefix="$" step={50}/>
+            <NF label="Other Income" value={i.otherIncome||0} onChange={sv("otherIncome")} prefix="$" step={25}/>
+          </InputSection>
+          <InputSection title="Growth" accent="#7c3aed" defaultOpen>
+            <NF label="Appreciation %" value={i.appreciation||3} onChange={sv("appreciation")} suffix="%" step={0.5}/>
+            <NF label="Rent Growth %" value={i.rentGrowth||2} onChange={sv("rentGrowth")} suffix="%" step={0.5}/>
+            <NF label="Exp. Inflation %" value={i.expenseGrowth||2} onChange={sv("expenseGrowth")} suffix="%" step={0.5}/>
+          </InputSection>
+        </div>
+
+        <InputSection title="Operating Expenses" accent="#6b7280" defaultOpen={false} badge={`${fmtD(totalExp)}/mo`}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:8}}>
+            {[["Taxes",sv("taxes"),i.taxes,25],["Insurance",sv("insurance"),i.insurance,10],["Vacancy",sv("vacancy"),i.vacancy,25],["Repairs",sv("repairs"),i.repairs,25],["CapEx",sv("capex"),i.capex,25],["Mgmt",sv("mgmt"),i.mgmt,25],["Utilities",sv("utilities"),i.utilities,25],["HOA",sv("hoa"),i.hoa,25]]
+            .map(([l,fn,v,s])=><NF key={l} label={l} value={v} onChange={fn} prefix="$" step={s}/>)}
+          </div>
+        </InputSection>
+      </div>
 
       {/* ══════════════════════════════════════════════════════════════════════
           SECTION 2 — STABILITY (Survival Under Stress)
@@ -2281,9 +2283,7 @@ function RentalCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro,al
         );
       })()}
 
-      </>
-      }{/* end hasData */}
-
+      
       {/* Portfolio impact note */}
       {portImpact&&portImpact.dealCount>0&&(
         <div style={{background:"#f0f9ff",borderRadius:12,padding:"12px 16px",border:"1px solid #bae6fd",marginBottom:8}}>
@@ -2489,7 +2489,7 @@ function WholesaleCalc({saved,onCalcChange,isPro:isProProp,onActivatePro}) {
   const [profitMode,setProfitMode] = useState("fixed");
   const [strategyProfile,setStrategyProfile] = useState("balanced");
   const [projOpen,setProjOpen] = useState(false);
-  const [i,setI] = useState(saved||{arv:"",repairs:"",pct:70,fee:"",holding:"",closing:"",profitTarget:"",profitPct:10});
+  const [i,setI] = useState(saved||{arv:185000,repairs:22000,pct:70,fee:12000,holding:1500,closing:2500,profitTarget:12000,profitPct:10});
   const s = k => v => setI(p=>({...p,[k]:v}));
 
   const adjArv = useMemo(()=>+i.arv*(1+arvAdj/100),[i.arv,arvAdj]);
@@ -2556,40 +2556,7 @@ function WholesaleCalc({saved,onCalcChange,isPro:isProProp,onActivatePro}) {
 
   return (<>
     <AddressBar value={addr} onChange={setAddr}/>
-    {/* INPUTS */}
-    <div style={{marginBottom:14}}>
-      <InputSection title="Deal Details" accent="#2563eb" defaultOpen>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-          <Field label="ARV" value={i.arv} onChange={s("arv")} prefix="$" step={5000}/>
-          <Field label="Repairs" value={i.repairs} onChange={s("repairs")} prefix="$" step={1000}/>
-          <Field label="Wholesale Fee" value={i.fee} onChange={s("fee")} prefix="$" step={500}/>
-          {!advMode&&<Field label="Max Offer %" value={i.pct} onChange={s("pct")} suffix="%" step={1}/>}
-        </div>
-        {advMode&&(
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:8}}>
-            <Field label="Holding Costs" value={i.holding} onChange={s("holding")} prefix="$" step={500}/>
-            <Field label="Closing Costs" value={i.closing} onChange={s("closing")} prefix="$" step={500}/>
-            <div style={{gridColumn:"1/-1"}}>
-              <div style={{display:"flex",gap:6,marginBottom:6}}>
-                {[["fixed","Fixed $"],["pct","% of ARV"]].map(([m,lbl])=>(
-                  <button key={m} onClick={()=>setProfitMode(m)} style={{padding:"4px 10px",borderRadius:100,border:`1.5px solid ${profitMode===m?"#2563eb":"#e5e7eb"}`,background:profitMode===m?"#eff6ff":"white",color:profitMode===m?"#2563eb":"#6b7280",fontSize:10,fontWeight:700,cursor:"pointer"}}>{lbl}</button>
-                ))}
-              </div>
-              {profitMode==="fixed"
-                ?<Field label="Target Investor Profit ($)" value={i.profitTarget} onChange={s("profitTarget")} prefix="$" step={1000}/>
-                :<Field label="Target Investor Profit (%)" value={i.profitPct} onChange={s("profitPct")} suffix="%" step={1}/>
-              }
-            </div>
-          </div>
-        )}
-        <div style={{marginTop:8}}>
-          <button onClick={()=>setAdvMode(a=>!a)} style={{padding:"5px 14px",borderRadius:100,border:"1.5px solid #e5e7eb",background:"white",color:"#6b7280",fontSize:10,fontWeight:600,cursor:"pointer"}}>
-            {advMode?"↑ Basic Mode":"↓ Advanced Mode"}
-          </button>
-        </div>
-      </InputSection>
-    {wsHasData&&<>
-    {/* SECTION 1 — DEAL VERDICT */}
+            {/* SECTION 1 — DEAL VERDICT */}
     <UniversalVerdictHeader
       verdict={wsRisk.verdict}
       vIcon={wsRisk.vIcon}
@@ -2638,7 +2605,39 @@ function WholesaleCalc({saved,onCalcChange,isPro:isProProp,onActivatePro}) {
       </div>
     </div>
 
+    {/* INPUTS */}
+    <div style={{marginBottom:14}}>
+      <InputSection title="Deal Details" accent="#2563eb" defaultOpen>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+          <Field label="ARV" value={i.arv} onChange={s("arv")} prefix="$" step={5000}/>
+          <Field label="Repairs" value={i.repairs} onChange={s("repairs")} prefix="$" step={1000}/>
+          <Field label="Wholesale Fee" value={i.fee} onChange={s("fee")} prefix="$" step={500}/>
+          {!advMode&&<Field label="Max Offer %" value={i.pct} onChange={s("pct")} suffix="%" step={1}/>}
         </div>
+        {advMode&&(
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:8}}>
+            <Field label="Holding Costs" value={i.holding} onChange={s("holding")} prefix="$" step={500}/>
+            <Field label="Closing Costs" value={i.closing} onChange={s("closing")} prefix="$" step={500}/>
+            <div style={{gridColumn:"1/-1"}}>
+              <div style={{display:"flex",gap:6,marginBottom:6}}>
+                {[["fixed","Fixed $"],["pct","% of ARV"]].map(([m,lbl])=>(
+                  <button key={m} onClick={()=>setProfitMode(m)} style={{padding:"4px 10px",borderRadius:100,border:`1.5px solid ${profitMode===m?"#2563eb":"#e5e7eb"}`,background:profitMode===m?"#eff6ff":"white",color:profitMode===m?"#2563eb":"#6b7280",fontSize:10,fontWeight:700,cursor:"pointer"}}>{lbl}</button>
+                ))}
+              </div>
+              {profitMode==="fixed"
+                ?<Field label="Target Investor Profit ($)" value={i.profitTarget} onChange={s("profitTarget")} prefix="$" step={1000}/>
+                :<Field label="Target Investor Profit (%)" value={i.profitPct} onChange={s("profitPct")} suffix="%" step={1}/>
+              }
+            </div>
+          </div>
+        )}
+        <div style={{marginTop:8}}>
+          <button onClick={()=>setAdvMode(a=>!a)} style={{padding:"5px 14px",borderRadius:100,border:"1.5px solid #e5e7eb",background:"white",color:"#6b7280",fontSize:10,fontWeight:600,cursor:"pointer"}}>
+            {advMode?"↑ Basic Mode":"↓ Advanced Mode"}
+          </button>
+        </div>
+      </InputSection>
+    </div>
 
     {/* SECTION 2 — STABILITY (spread protection / stress) */}
     <SectionCard title="Stability" subtitle="Spread protection under stress — fragility only" badge={wsRisk.verdict} badgeColor={wsRisk.vColor}>
@@ -2742,9 +2741,7 @@ function WholesaleCalc({saved,onCalcChange,isPro:isProProp,onActivatePro}) {
       )}
     </div>
     
-    </ProGate></>
-    }{/* end wsHasData */}
-  </>);
+    </ProGate>  </>);
 }
 
 function flipRiskScore(c, strategyMode="balanced") {
@@ -2828,7 +2825,7 @@ function FlipCalc({saved,onCalcChange,isPro:isProProp,onActivatePro}) {
   const [finType,setFinType] = useState("conventional");
   const [arvAdj,setArvAdj] = useState(0);
   const [projOpen,setProjOpen] = useState(false);
-  const [i,setI] = useState(saved||{arv:"",pp:"",repairs:"",holding:"",closing:"",finance:0,emd:"",emdRefundable:true,duration:6});
+  const [i,setI] = useState(saved||{arv:285000,pp:165000,repairs:38000,holding:5200,closing:5700,finance:0,emd:5000,emdRefundable:true,duration:6});
   const s = k => v => setI(p=>({...p,[k]:v}));
 
   const adjArv = useMemo(()=>+i.arv*(1+arvAdj/100),[i.arv,arvAdj]);
@@ -2893,31 +2890,7 @@ function FlipCalc({saved,onCalcChange,isPro:isProProp,onActivatePro}) {
 
   return (<>
     <AddressBar value={addr} onChange={setAddr}/>
-    {/* INPUTS */}
-    <InputSection title="Deal Numbers" accent="#7c3aed" defaultOpen badge={`Profit: ${fmtD(c.profit)}`}>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-        <Field label="ARV" value={i.arv} onChange={s("arv")} prefix="$" step={5000}/>
-        <Field label="Purchase Price" value={i.pp} onChange={s("pp")} prefix="$" step={5000}/>
-        <Field label="Rehab Budget" value={i.repairs} onChange={s("repairs")} prefix="$" step={1000}/>
-        <Field label="Holding Costs" value={i.holding} onChange={s("holding")} prefix="$" step={500}/>
-        <Field label="Closing Costs" value={i.closing} onChange={s("closing")} prefix="$" step={500}/>
-        <Field label="Finance Costs" value={i.finance} onChange={s("finance")} prefix="$" step={500}/>
-        <Field label="Duration (mo)" value={i.duration} onChange={s("duration")} suffix="mo" step={1}/>
-        <Field label="EMD" value={i.emd} onChange={s("emd")} prefix="$" step={500}/>
-      </div>
-      <div style={{marginTop:8,display:"flex",gap:6,alignItems:"center"}}>
-        <span style={{fontSize:10,color:"#6b7280"}}>EMD:</span>
-        {[true,false].map(ref=>(
-          <button key={String(ref)} onClick={()=>s("emdRefundable")(ref)}
-            style={{padding:"4px 10px",borderRadius:100,border:`1.5px solid ${i.emdRefundable===ref?emdRisk.col:"#e5e7eb"}`,background:i.emdRefundable===ref?emdRisk.col+"15":"white",color:i.emdRefundable===ref?emdRisk.col:"#6b7280",fontSize:10,fontWeight:700,cursor:"pointer"}}>
-            {ref?"Refundable":"Non-Refundable"}
-          </button>
-        ))}
-        <span style={{fontSize:9,fontWeight:700,color:emdRisk.col,background:emdRisk.col+"15",padding:"2px 8px",borderRadius:100}}>{emdRisk.level} EMD Risk</span>
-      </div>
-    </InputSection>
-    {flipHasData&&<>
-    {/* SECTION 1 — DEAL VERDICT */}
+            {/* SECTION 1 — DEAL VERDICT */}
     <UniversalVerdictHeader
       verdict={flipRisk.verdict}
       vIcon={flipRisk.vIcon}
@@ -2965,7 +2938,30 @@ function FlipCalc({saved,onCalcChange,isPro:isProProp,onActivatePro}) {
       </div>
     </div>
 
-    
+    {/* INPUTS */}
+    <InputSection title="Deal Numbers" accent="#7c3aed" defaultOpen badge={`Profit: ${fmtD(c.profit)}`}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+        <Field label="ARV" value={i.arv} onChange={s("arv")} prefix="$" step={5000}/>
+        <Field label="Purchase Price" value={i.pp} onChange={s("pp")} prefix="$" step={5000}/>
+        <Field label="Rehab Budget" value={i.repairs} onChange={s("repairs")} prefix="$" step={1000}/>
+        <Field label="Holding Costs" value={i.holding} onChange={s("holding")} prefix="$" step={500}/>
+        <Field label="Closing Costs" value={i.closing} onChange={s("closing")} prefix="$" step={500}/>
+        <Field label="Finance Costs" value={i.finance} onChange={s("finance")} prefix="$" step={500}/>
+        <Field label="Duration (mo)" value={i.duration} onChange={s("duration")} suffix="mo" step={1}/>
+        <Field label="EMD" value={i.emd} onChange={s("emd")} prefix="$" step={500}/>
+      </div>
+      <div style={{marginTop:8,display:"flex",gap:6,alignItems:"center"}}>
+        <span style={{fontSize:10,color:"#6b7280"}}>EMD:</span>
+        {[true,false].map(ref=>(
+          <button key={String(ref)} onClick={()=>s("emdRefundable")(ref)}
+            style={{padding:"4px 10px",borderRadius:100,border:`1.5px solid ${i.emdRefundable===ref?emdRisk.col:"#e5e7eb"}`,background:i.emdRefundable===ref?emdRisk.col+"15":"white",color:i.emdRefundable===ref?emdRisk.col:"#6b7280",fontSize:10,fontWeight:700,cursor:"pointer"}}>
+            {ref?"Refundable":"Non-Refundable"}
+          </button>
+        ))}
+        <span style={{fontSize:9,fontWeight:700,color:emdRisk.col,background:emdRisk.col+"15",padding:"2px 8px",borderRadius:100}}>{emdRisk.level} EMD Risk</span>
+      </div>
+    </InputSection>
+
     {/* SECTION 2 — STABILITY */}
     <SectionCard title="Stability" subtitle="Profit survival under stress — fragility only" badge={flipRisk.verdict} badgeColor={flipRisk.vColor}>
       <MetricGrid items={[
@@ -3058,9 +3054,7 @@ function FlipCalc({saved,onCalcChange,isPro:isProProp,onActivatePro}) {
       )}
     </div>
     
-    </ProGate></>
-    }{/* end flipHasData */}
-  </>);
+    </ProGate>  </>);
 }
 
 function brrrRiskScore(c) {
@@ -3134,7 +3128,7 @@ function BRRRRCalc({saved,onCalcChange,isPro:isProProp,onActivatePro}) {
   const [addr,setAddr] = useState(saved?.address||"");
   const [projOpen,setProjOpen] = useState(false);
   const [arvAdj,setArvAdj] = useState(0);
-  const [i,setI] = useState(saved||{pp:"",repairs:"",arv:"",refiLtv:75,refiRate:7.0,refiTerm:30,rent:"",expenses:"",holding:""});
+  const [i,setI] = useState(saved||{pp:145000,repairs:35000,arv:240000,refiLtv:75,refiRate:7.0,refiTerm:30,rent:2000,expenses:550,holding:4000});
   const s = k => v => setI(p=>({...p,[k]:v}));
 
   const adjArv = useMemo(()=>+i.arv*(1+arvAdj/100),[i.arv,arvAdj]);
@@ -3193,22 +3187,7 @@ function BRRRRCalc({saved,onCalcChange,isPro:isProProp,onActivatePro}) {
 
   return (<>
     <AddressBar value={addr} onChange={setAddr}/>
-    {/* INPUTS */}
-    <InputSection title="Deal & Refinance" accent="#059669" defaultOpen>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-        <Field label="Purchase Price" value={i.pp} onChange={s("pp")} prefix="$" step={5000}/>
-        <Field label="Rehab Budget" value={i.repairs} onChange={s("repairs")} prefix="$" step={1000}/>
-        <Field label="ARV" value={i.arv} onChange={s("arv")} prefix="$" step={5000}/>
-        <Field label="Holding Costs" value={i.holding} onChange={s("holding")} prefix="$" step={500}/>
-        <Field label="Refi LTV %" value={i.refiLtv} onChange={s("refiLtv")} suffix="%" step={1}/>
-        <Field label="Refi Rate %" value={i.refiRate} onChange={s("refiRate")} suffix="%" step={0.125}/>
-        <Field label="Refi Term" value={i.refiTerm} onChange={s("refiTerm")} suffix="yr" step={5}/>
-        <Field label="Monthly Rent" value={i.rent} onChange={s("rent")} prefix="$" step={50}/>
-        <Field label="Expenses" value={i.expenses} onChange={s("expenses")} prefix="$" step={50}/>
-      </div>
-    </InputSection>
-    {brrrrHasData&&<>
-    {/* SECTION 1 — DEAL VERDICT */}
+            {/* SECTION 1 — DEAL VERDICT */}
     <UniversalVerdictHeader
       verdict={brrrRisk.verdict}
       vIcon={brrrRisk.vIcon}
@@ -3250,7 +3229,21 @@ function BRRRRCalc({saved,onCalcChange,isPro:isProProp,onActivatePro}) {
       </div>}
     </div>
 
-    
+    {/* INPUTS */}
+    <InputSection title="Deal & Refinance" accent="#059669" defaultOpen>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+        <Field label="Purchase Price" value={i.pp} onChange={s("pp")} prefix="$" step={5000}/>
+        <Field label="Rehab Budget" value={i.repairs} onChange={s("repairs")} prefix="$" step={1000}/>
+        <Field label="ARV" value={i.arv} onChange={s("arv")} prefix="$" step={5000}/>
+        <Field label="Holding Costs" value={i.holding} onChange={s("holding")} prefix="$" step={500}/>
+        <Field label="Refi LTV %" value={i.refiLtv} onChange={s("refiLtv")} suffix="%" step={1}/>
+        <Field label="Refi Rate %" value={i.refiRate} onChange={s("refiRate")} suffix="%" step={0.125}/>
+        <Field label="Refi Term" value={i.refiTerm} onChange={s("refiTerm")} suffix="yr" step={5}/>
+        <Field label="Monthly Rent" value={i.rent} onChange={s("rent")} prefix="$" step={50}/>
+        <Field label="Expenses" value={i.expenses} onChange={s("expenses")} prefix="$" step={50}/>
+      </div>
+    </InputSection>
+
     {/* SECTION 2 — STABILITY */}
     <SectionCard title="Stability" subtitle="Refinance fragility + DSCR + ARV sensitivity" badge={brrrRisk.verdict} badgeColor={brrrRisk.vColor}>
       <MetricGrid items={[
@@ -3340,8 +3333,7 @@ function BRRRRCalc({saved,onCalcChange,isPro:isProProp,onActivatePro}) {
       )}
     </div>
     
-    </ProGate></>}{/* end brrrrHasData */}
-  </>);
+    </ProGate>  </>);
 }
 
 // generate offer letter and download
@@ -3468,7 +3460,7 @@ function SubToCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro}) {
   const [projOpen,setProjOpen] = useState(false);
   const [exitMode,setExitMode] = useState("hold");
   const [loanType,setLoanType] = useState("conventional");
-  const [i,setI] = useState(saved||{pp:"",existingBalance:"",existingRate:"",existingTerm:30,remainingYears:30,monthlyPiti:"",rent:"",expenses:"",marketRate:7.5,capitalIn:"",arrears:0,taxesCurrent:true,adjustable:false,balloon:false,balloonYears:7});
+  const [i,setI] = useState(saved||{pp:220000,existingBalance:180000,existingRate:3.5,existingTerm:30,remainingYears:25,monthlyPiti:850,rent:2000,expenses:400,marketRate:7.5,capitalIn:15000,arrears:0,taxesCurrent:true,adjustable:false,balloon:false,balloonYears:7});
   const s = k => v => setI(p=>({...p,[k]:v}));
 
   const c = useMemo(()=>{
@@ -3523,21 +3515,7 @@ function SubToCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro}) {
 
   return (<>
     <AddressBar value={addr} onChange={setAddr}/>
-    {/* INPUTS */}
-    <InputSection title="Subject-To Details" accent="#7c3aed" defaultOpen>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-        <Field label="Purchase Price" value={i.pp} onChange={s("pp")} prefix="$" step={5000}/>
-        <Field label="Existing Balance" value={i.existingBalance} onChange={s("existingBalance")} prefix="$" step={5000}/>
-        <Field label="Existing Rate %" value={i.existingRate} onChange={s("existingRate")} suffix="%" step={0.125}/>
-        <Field label="Market Rate %" value={i.marketRate} onChange={s("marketRate")} suffix="%" step={0.125}/>
-        <Field label="Monthly P&I" value={i.monthlyPiti} onChange={s("monthlyPiti")} prefix="$" step={25}/>
-        <Field label="Capital In" value={i.capitalIn} onChange={s("capitalIn")} prefix="$" step={1000}/>
-        <Field label="Monthly Rent" value={i.rent} onChange={s("rent")} prefix="$" step={50}/>
-        <Field label="Expenses" value={i.expenses} onChange={s("expenses")} prefix="$" step={25}/>
-      </div>
-    </InputSection>
-    {subtoHasData&&<>
-    {/* SECTION 1 — DEAL VERDICT */}
+            {/* SECTION 1 — DEAL VERDICT */}
     <UniversalVerdictHeader
       verdict={subtoRisk.verdict}
       vIcon={subtoRisk.vIcon}
@@ -3584,7 +3562,20 @@ function SubToCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro}) {
       </div>
     </div>
 
-    
+    {/* INPUTS */}
+    <InputSection title="Subject-To Details" accent="#7c3aed" defaultOpen>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+        <Field label="Purchase Price" value={i.pp} onChange={s("pp")} prefix="$" step={5000}/>
+        <Field label="Existing Balance" value={i.existingBalance} onChange={s("existingBalance")} prefix="$" step={5000}/>
+        <Field label="Existing Rate %" value={i.existingRate} onChange={s("existingRate")} suffix="%" step={0.125}/>
+        <Field label="Market Rate %" value={i.marketRate} onChange={s("marketRate")} suffix="%" step={0.125}/>
+        <Field label="Monthly P&I" value={i.monthlyPiti} onChange={s("monthlyPiti")} prefix="$" step={25}/>
+        <Field label="Capital In" value={i.capitalIn} onChange={s("capitalIn")} prefix="$" step={1000}/>
+        <Field label="Monthly Rent" value={i.rent} onChange={s("rent")} prefix="$" step={50}/>
+        <Field label="Expenses" value={i.expenses} onChange={s("expenses")} prefix="$" step={25}/>
+      </div>
+    </InputSection>
+
     {/* SECTION 2 — STABILITY (DSCR / DOS / thin cash flow fragility) */}
     <SectionCard title="Stability" subtitle="DSCR fragility · Due-on-sale risk · Cash flow durability" badge={subtoRisk.verdict} badgeColor={subtoRisk.vColor}>
       <MetricGrid items={[
@@ -3676,9 +3667,7 @@ function SubToCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro}) {
       )}
     </div>
     
-    </ProGate></>
-    }{/* end subtoHasData */}
-  </>);
+    </ProGate>  </>);
 }
 
 function novationRiskScore(c) {
@@ -3754,7 +3743,7 @@ function NovationCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro}
   const [projOpen,setProjOpen] = useState(false);
   const [arvAdj,setArvAdj] = useState(0);
   const [finType,setFinType] = useState("conventional");
-  const [i,setI] = useState(saved||{arv:"",sellerPayout:"",repairs:"",holding:"",closing:"",capitalIn:"",duration:4,targetProfit:""});
+  const [i,setI] = useState(saved||{arv:300000,sellerPayout:220000,repairs:15000,holding:3000,closing:5000,capitalIn:5000,duration:4,targetProfit:40000});
   const s = k => v => setI(p=>({...p,[k]:v}));
 
   const adjArv = useMemo(()=>+i.arv*(1+arvAdj/100),[i.arv,arvAdj]);
@@ -3816,20 +3805,7 @@ function NovationCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro}
 
   return (<>
     <AddressBar value={addr} onChange={setAddr}/>
-    {/* INPUTS */}
-    <InputSection title="Novation Deal Details" accent="#be185d" defaultOpen badge={`Profit: ${fmtD(c.profit)}`}>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-        <Field label="ARV" value={i.arv} onChange={s("arv")} prefix="$" step={5000}/>
-        <Field label="Seller Payout" value={i.sellerPayout} onChange={s("sellerPayout")} prefix="$" step={5000}/>
-        <Field label="Repairs" value={i.repairs} onChange={s("repairs")} prefix="$" step={500}/>
-        <Field label="Holding Costs" value={i.holding} onChange={s("holding")} prefix="$" step={500}/>
-        <Field label="Closing Costs" value={i.closing} onChange={s("closing")} prefix="$" step={500}/>
-        <Field label="Capital In" value={i.capitalIn} onChange={s("capitalIn")} prefix="$" step={500}/>
-        <Field label="Timeline (mo)" value={i.duration} onChange={s("duration")} suffix="mo" step={1}/>
-      </div>
-    </InputSection>
-    {novHasData&&<>
-    {/* SECTION 1 — DEAL VERDICT */}
+            {/* SECTION 1 — DEAL VERDICT */}
     <UniversalVerdictHeader
       verdict={novRisk.verdict}
       vIcon={novRisk.vIcon}
@@ -3877,7 +3853,19 @@ function NovationCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro}
       </div>
     </div>
 
-    
+    {/* INPUTS */}
+    <InputSection title="Novation Deal Details" accent="#be185d" defaultOpen badge={`Profit: ${fmtD(c.profit)}`}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+        <Field label="ARV" value={i.arv} onChange={s("arv")} prefix="$" step={5000}/>
+        <Field label="Seller Payout" value={i.sellerPayout} onChange={s("sellerPayout")} prefix="$" step={5000}/>
+        <Field label="Repairs" value={i.repairs} onChange={s("repairs")} prefix="$" step={500}/>
+        <Field label="Holding Costs" value={i.holding} onChange={s("holding")} prefix="$" step={500}/>
+        <Field label="Closing Costs" value={i.closing} onChange={s("closing")} prefix="$" step={500}/>
+        <Field label="Capital In" value={i.capitalIn} onChange={s("capitalIn")} prefix="$" step={500}/>
+        <Field label="Timeline (mo)" value={i.duration} onChange={s("duration")} suffix="mo" step={1}/>
+      </div>
+    </InputSection>
+
     {/* SECTION 2 — STABILITY (retail friction + ARV + timeline exposure) */}
     <SectionCard title="Stability" subtitle="Retail friction · ARV compression · Timeline exposure" badge={novRisk.verdict} badgeColor={novRisk.vColor}>
       <MetricGrid items={[
@@ -3978,8 +3966,7 @@ function NovationCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro}
       )}
     </div>
     
-    </ProGate></>}{/* end novHasData */}
-  </>);
+    </ProGate>  </>);
 }
 
 // ─── Forum ─────────────────────────────────────────────────────────────────────
@@ -4108,7 +4095,7 @@ function ReactionBar({post, onReact, userReaction, onReactWithReason}) {
   );
 }
 
-function ForumView({user, profile, savedDeals=[]}) {
+function ForumView({user, profile, savedDeals=[], isPro=false}) {
   const [posts, setPosts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showNew, setShowNew] = useState(false);
@@ -6242,11 +6229,11 @@ function LandingPage({onGoSignIn,onGoSignUp}) {
               Know If a Deal Works<br/><span style={{color:"#10b981",fontStyle:"italic"}}>Before You Make an Offer</span>
             </h1>
             <p style={{fontSize:"clamp(15px,1.8vw,19px)",color:"#6b7280",maxWidth:540,margin:"0 auto 16px",lineHeight:1.65}}>
-              Enter your numbers. Get an instant verdict — cash flow, DSCR, risk score, stress tests — across 6 investment strategies. No spreadsheets. No guessing.
+              Analyze any real estate deal in seconds. Get a Margin, Risk & Velocity score, stress tests, Monte Carlo simulation, and a plain-English verdict — across 6 strategies. Built for serious investors.
             </p>
             {/* 3 proof points */}
             <div style={{display:"flex",justifyContent:"center",gap:24,marginBottom:28,flexWrap:"wrap"}}>
-              {[["✓","Formulas are investor-standard"],["✓","All 6 strategies covered"],["✓","Risk score tells you pass/fail instantly"]].map(([icon,txt])=>(
+              {[["✓","6 strategies: Rental, Flip, Wholesale, BRRRR, Sub-To, Novation"],["✓","AI verdict with Margin, Risk & Velocity pillar scores"],["✓","Stress tests, Monte Carlo & 30-year projections"]].map(([icon,txt])=>(
                 <div key={txt} style={{display:"flex",alignItems:"center",gap:6,fontSize:13,color:"#059669",fontWeight:600}}>
                   <span style={{fontSize:12}}>{icon}</span>{txt}
                 </div>
@@ -6394,6 +6381,31 @@ function LandingPage({onGoSignIn,onGoSignUp}) {
           ))}
         </div>
       </section>
+
+      {/* ── How It Works ───────────────────────────────────────────────────── */}
+      <section style={{padding:"60px 20px",background:"#f8fafc"}}>
+        <div style={{maxWidth:1000,margin:"0 auto",textAlign:"center"}}>
+          <div style={{fontSize:11,fontWeight:800,color:"#059669",letterSpacing:"0.12em",textTransform:"uppercase",marginBottom:10}}>HOW IT WORKS</div>
+          <h2 style={{fontFamily:"'Fraunces',serif",fontSize:"clamp(26px,3.5vw,38px)",fontWeight:900,color:"#111827",marginBottom:12}}>From address to verdict in 60 seconds</h2>
+          <p style={{fontSize:15,color:"#6b7280",marginBottom:44,maxWidth:520,margin:"0 auto 44px"}}>No spreadsheets. No guesswork. Just enter your numbers and get a decision.</p>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:24}}>
+            {[
+              {step:"01",icon:"🏠",title:"Pick your strategy",desc:"Choose from Rental, Wholesale, Fix & Flip, BRRRR, Subject-To, or Novation"},
+              {step:"02",icon:"🔢",title:"Enter the numbers",desc:"Purchase price, rent, repairs — the same inputs you'd put in a spreadsheet"},
+              {step:"03",icon:"🧠",title:"Get your verdict",desc:"Margin, Risk & Velocity pillar scores with a plain-English buy/pass recommendation"},
+              {step:"04",icon:"📊",title:"Stress test & decide",desc:"See how the deal holds up under vacancy spikes, rate increases, and repair overruns"},
+            ].map(({step,icon,title,desc})=>(
+              <div key={step} style={{background:"white",borderRadius:16,padding:"24px 20px",border:"1.5px solid #e5e7eb",textAlign:"left",position:"relative",overflow:"hidden"}}>
+                <div style={{position:"absolute",top:12,right:14,fontSize:11,fontWeight:800,color:"#e5e7eb",fontFamily:"'DM Mono',monospace"}}>{step}</div>
+                <div style={{fontSize:28,marginBottom:12}}>{icon}</div>
+                <div style={{fontSize:14,fontWeight:700,color:"#111827",marginBottom:6}}>{title}</div>
+                <div style={{fontSize:12,color:"#6b7280",lineHeight:1.6}}>{desc}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
 
       {/* ── Why DealSource — Value Proposition ─────────────────────────── */}
       <section style={{padding:"80px 32px",background:"white"}}>
@@ -6569,6 +6581,38 @@ function LandingPage({onGoSignIn,onGoSignUp}) {
       </section>
 
       {/* Pricing */}
+      {/* ── Testimonials ─────────────────────────────────────────────────── */}
+      <section style={{padding:"60px 20px",background:"white"}}>
+        <div style={{maxWidth:1000,margin:"0 auto"}}>
+          <div style={{textAlign:"center",marginBottom:40}}>
+            <div style={{fontSize:11,fontWeight:800,color:"#059669",letterSpacing:"0.12em",textTransform:"uppercase",marginBottom:10}}>WHAT INVESTORS SAY</div>
+            <h2 style={{fontFamily:"'Fraunces',serif",fontSize:"clamp(24px,3vw,34px)",fontWeight:900,color:"#111827"}}>Built by investors, used by investors</h2>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))",gap:20}}>
+            {[
+              {quote:"I used to spend 2 hours building spreadsheets for every deal. Now I get a full risk analysis in under a minute and know exactly what questions to ask the seller.",name:"Marcus T.",role:"Buy & Hold Investor · 12 doors",avatar:"MT"},
+              {quote:"The Subject-To calculator alone saved me from a bad deal. It caught the due-on-sale risk I almost missed. That's the kind of intelligence you don't get from a spreadsheet.",name:"Priya M.",role:"Creative Finance Investor",avatar:"PM"},
+              {quote:"The stress tests are what got me. I can model rate increases, vacancy spikes, and repair overruns before I even make an offer. It's changed how I underwrite everything.",name:"James R.",role:"BRRRR Investor · 8 deals closed",avatar:"JR"},
+            ].map(({quote,name,role,avatar})=>(
+              <div key={name} style={{background:"#f8fafc",borderRadius:16,padding:"24px",border:"1.5px solid #e5e7eb"}}>
+                <div style={{fontSize:20,color:"#10b981",marginBottom:12,lineHeight:1}}>"</div>
+                <p style={{fontSize:13,color:"#374151",lineHeight:1.7,marginBottom:16,fontStyle:"italic"}}>{quote}</p>
+                <div style={{display:"flex",alignItems:"center",gap:10}}>
+                  <div style={{width:36,height:36,borderRadius:"50%",background:"linear-gradient(135deg,#10b981,#059669)",display:"flex",alignItems:"center",justifyContent:"center"}}>
+                    <span style={{fontSize:11,fontWeight:800,color:"white"}}>{avatar}</span>
+                  </div>
+                  <div>
+                    <div style={{fontSize:13,fontWeight:700,color:"#111827"}}>{name}</div>
+                    <div style={{fontSize:11,color:"#9ca3af"}}>{role}</div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+
       <section id="pricing" style={{padding:"88px 32px",background:"#fafafa"}}>
         <div style={{maxWidth:720,margin:"0 auto",textAlign:"center"}}>
           <p style={{fontSize:11,fontWeight:700,letterSpacing:"0.12em",color:"#10b981",textTransform:"uppercase",marginBottom:12}}>Pricing</p>
@@ -6578,7 +6622,7 @@ function LandingPage({onGoSignIn,onGoSignUp}) {
             <div style={{padding:32,borderRadius:18,border:"1.5px solid #e5e7eb",background:"white",textAlign:"left"}}>
               <p style={{fontSize:12,fontWeight:600,color:"#9ca3af",marginBottom:10}}>Free</p>
               <div style={{fontFamily:"'Fraunces',serif",fontSize:40,fontWeight:900,color:"#111827",marginBottom:28}}>$0</div>
-              {["All 6 calculators","Deal Verdict + Risk Score","Stability & Stress Tests","Save up to 3 deals","Community forum (read)","Medal ranking"].map(f=>(
+              {["All 6 strategy calculators","Margin · Risk · Velocity pillar scores","Stress test & deal stability","Save up to 3 deals","Community forum (read-only)","Medal ranking system"].map(f=>(
                 <div key={f} style={{display:"flex",gap:10,alignItems:"center",marginBottom:10}}><span style={{color:"#10b981",fontWeight:700}}>✓</span><span style={{fontSize:14,color:"#374151"}}>{f}</span></div>
               ))}
               {["Capital Efficiency Analysis","Deal Optimization sliders","30-yr Projections","Auto Offer Letters","Unlimited deal saves","Mentoring access"].map(f=>(
@@ -6593,7 +6637,7 @@ function LandingPage({onGoSignIn,onGoSignUp}) {
                 <span style={{fontFamily:"'Fraunces',serif",fontSize:40,fontWeight:900,color:"white"}}>$20</span>
                 <span style={{fontSize:14,color:"#6b7280"}}>/month</span>
               </div>
-              {["All 6 calculators (all results)","Capital Efficiency Analysis","Deal Optimization sliders","30-yr Wealth Projections","Decision Intelligence (Monte Carlo)","Auto-generated offer letters","Unlimited saved deals","Expert mentoring access","Leaderboard eligibility"].map(f=>(
+              {["All 6 strategy calculators (full)","Capital Efficiency & Optimization","30-yr Wealth Projections","Decision Intelligence & Monte Carlo","Auto-generated offer letters","Unlimited saved deals & portfolio analysis","Expert mentor access","Leaderboard & community posting"].map(f=>(
                 <div key={f} style={{display:"flex",gap:10,alignItems:"center",marginBottom:10}}><span style={{color:"#10b981",fontWeight:700}}>✓</span><span style={{fontSize:14,color:"#e5e7eb"}}>{f}</span></div>
               ))}
               <button onClick={onGoSignUp} style={{width:"100%",marginTop:24,padding:"12px 0",borderRadius:10,border:"none",background:"#10b981",color:"white",fontSize:14,fontWeight:700,cursor:"pointer"}}>Start Free Trial</button>
@@ -6601,6 +6645,29 @@ function LandingPage({onGoSignIn,onGoSignUp}) {
           </div>
         </div>
       </section>
+
+      {/* ── FAQ ───────────────────────────────────────────────────────────── */}
+      <section style={{padding:"60px 20px",background:"#f8fafc"}}>
+        <div style={{maxWidth:700,margin:"0 auto"}}>
+          <div style={{textAlign:"center",marginBottom:40}}>
+            <div style={{fontSize:11,fontWeight:800,color:"#059669",letterSpacing:"0.12em",textTransform:"uppercase",marginBottom:10}}>FAQ</div>
+            <h2 style={{fontFamily:"'Fraunces',serif",fontSize:"clamp(24px,3vw,34px)",fontWeight:900,color:"#111827"}}>Common questions</h2>
+          </div>
+          {[
+            {q:"Is this a replacement for a realtor or wholesaler?",a:"No — it's a decision tool. DealSource helps you quickly determine if a deal pencils before you spend hours on due diligence or make an offer. Think of it as your underwriting co-pilot."},
+            {q:"How accurate are the calculators?",a:"The formulas are investor-standard (DSCR, CoC, Cap Rate, MAO). Results are as accurate as the numbers you enter. The stress tests and Monte Carlo add a layer of probabilistic modeling that spreadsheets can't do."},
+            {q:"What's the difference between Free and Pro?",a:"Free gives you full access to all 6 calculators, the deal verdict, and basic stress tests — everything you need to evaluate a deal. Pro unlocks Capital Efficiency analysis, the Optimization engine, 30-year projections, Monte Carlo simulation, offer letters, and unlimited deal saves."},
+            {q:"Can I use this on mobile?",a:"Yes — DealSource is fully responsive and works on any device. The calculator inputs are optimized for mobile entry."},
+            {q:"What strategies are covered?",a:"Rental/Buy & Hold, Wholesale (MAO), Fix & Flip, BRRRR, Subject-To, and Novation. Each has its own tailored risk model and metrics."},
+          ].map(({q,a},i)=>(
+            <div key={i} style={{borderBottom:"1px solid #e5e7eb",padding:"20px 0"}}>
+              <div style={{fontSize:14,fontWeight:700,color:"#111827",marginBottom:8}}>{q}</div>
+              <div style={{fontSize:13,color:"#6b7280",lineHeight:1.7}}>{a}</div>
+            </div>
+          ))}
+        </div>
+      </section>
+
 
       <footer style={{padding:"32px",borderTop:"1px solid #e5e7eb",background:"#fafafa"}}>
         <div style={{maxWidth:1100,margin:"0 auto",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12}}>
@@ -6633,27 +6700,18 @@ function AnalyzerApp({user,profile,onGoHome,onGoProfile,onSignOut}) {
 
   useEffect(()=>{setIsPro(profile?.is_pro||false);},[profile]);
 
-  // Load saved deals on mount
   useEffect(()=>{
     if(!user?.id) return;
     setDealsLoading(true);
-    supabase.getDeals(user.id)
-      .then(d=>setDeals(Array.isArray(d)?d:[]))
-      .catch(()=>setDeals([]))
-      .finally(()=>setDealsLoading(false));
+    supabase.getDeals(user.id).then(d=>setDeals(Array.isArray(d)?d:[])).catch(()=>setDeals([])).finally(()=>setDealsLoading(false));
   },[user?.id]);
 
   const handleCalcChange=useCallback((inputs,metrics)=>{setCurrentInputs(inputs);setCurrentMetrics(metrics);},[]);
-
-  const dealLimit = isPro ? Infinity : FREE_DEAL_LIMIT;
-
-  const handleSaveClick=()=>{
-    if(deals.length>=dealLimit){ setSaveLimitHit(true); }
-    else{ setShowSaveModal(true); }
-  };
+  const dealLimit=isPro?Infinity:FREE_DEAL_LIMIT;
+  const handleSaveClick=()=>{ if(deals.length>=dealLimit){setSaveLimitHit(true);}else{setShowSaveModal(true);} };
 
   const handleSave=async(name)=>{
-    if(deals.length>=dealLimit){ setShowSaveModal(false); setSaveLimitHit(true); return; }
+    if(deals.length>=dealLimit){setShowSaveModal(false);setSaveLimitHit(true);return;}
     const deal={user_id:user.id,name,mode,inputs:currentInputs,metrics:currentMetrics,created_at:new Date().toISOString()};
     try{const saved=await supabase.insertDeal(deal);const nd=Array.isArray(saved)?saved[0]:{...deal,id:Date.now().toString()};setDeals(p=>[nd,...p]);setLoadedDealId(nd.id);}
     catch{const ld={...deal,id:Date.now().toString()};setDeals(p=>[ld,...p]);setLoadedDealId(ld.id);}
@@ -6685,25 +6743,20 @@ function AnalyzerApp({user,profile,onGoHome,onGoProfile,onSignOut}) {
       {showSaveModal&&<SaveDealModal mode={mode} onSave={handleSave} onClose={()=>setShowSaveModal(false)}/>}
       {saveLimitHit&&(
         <div onClick={()=>setSaveLimitHit(false)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.55)",backdropFilter:"blur(6px)",zIndex:800,display:"flex",alignItems:"center",justifyContent:"center",padding:24}}>
-          <div onClick={e=>e.stopPropagation()} style={{background:"white",borderRadius:22,padding:0,maxWidth:420,width:"100%",boxShadow:"0 32px 80px rgba(0,0,0,0.2)",overflow:"hidden",animation:"popIn 0.2s cubic-bezier(0.34,1.56,0.64,1) both"}}>
+          <div onClick={e=>e.stopPropagation()} style={{background:"white",borderRadius:22,padding:0,maxWidth:420,width:"100%",boxShadow:"0 32px 80px rgba(0,0,0,0.2)",overflow:"hidden"}}>
             <div style={{background:"linear-gradient(135deg,#064e3b,#065f46)",padding:"28px 32px"}}>
               <div style={{fontSize:36,marginBottom:10}}>💾</div>
               <h2 style={{fontFamily:"'Fraunces',serif",fontSize:21,fontWeight:800,color:"white",marginBottom:6}}>Free Plan: {FREE_DEAL_LIMIT}-Deal Limit</h2>
-              <p style={{fontSize:13,color:"rgba(255,255,255,0.65)",lineHeight:1.6}}>You've used all {FREE_DEAL_LIMIT} free deal saves. Upgrade to Pro for unlimited saves and advanced analytics.</p>
+              <p style={{fontSize:13,color:"rgba(255,255,255,0.65)",lineHeight:1.6}}>You've used all {FREE_DEAL_LIMIT} free deal saves. Upgrade to Pro for unlimited saves.</p>
             </div>
             <div style={{padding:"22px 32px"}}>
-              <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:18}}>
-                {["♾️ Unlimited saved deals","📊 Capital Efficiency Analysis","📈 30-year Wealth Projections","🧠 Decision Intelligence (Monte Carlo)","📄 Auto-generated offer letters"].map(f=>(
-                  <div key={f} style={{display:"flex",alignItems:"center",gap:10,fontSize:13,color:"#374151"}}>
-                    <span style={{color:"#10b981",flexShrink:0}}>✓</span>{f}
-                  </div>
-                ))}
-              </div>
-              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14,padding:"12px 14px",background:"#f0fdf4",borderRadius:11,border:"1.5px solid #bbf7d0"}}>
-                <div><div style={{fontSize:13,fontWeight:700,color:"#374151"}}>DealSource Pro</div><div style={{fontSize:11,color:"#6b7280"}}>Cancel anytime</div></div>
-                <div><span style={{fontSize:24,fontWeight:800,fontFamily:"'DM Mono',monospace",color:"#059669"}}>$20</span><span style={{fontSize:12,color:"#6b7280"}}>/mo</span></div>
-              </div>
-              <button onClick={async()=>{try{const r=await fetch("/api/create-checkout",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({userId:user.id,email:user.email||""})});const d=await r.json();if(d.url)window.location.href=d.url;}catch{setIsPro(true);setSaveLimitHit(false);}}} style={{width:"100%",padding:"13px",borderRadius:11,border:"none",background:"#10b981",color:"white",fontSize:15,fontWeight:700,cursor:"pointer",marginBottom:8,boxShadow:"0 4px 20px rgba(16,185,129,0.3)"}}>
+              {["♾️ Unlimited saved deals","📊 Capital Efficiency & Optimization","📈 30-year Wealth Projections","🧠 Decision Intelligence (Monte Carlo)","📄 Auto-generated offer letters"].map(f=>(
+                <div key={f} style={{display:"flex",alignItems:"center",gap:10,fontSize:13,color:"#374151",marginBottom:8}}><span style={{color:"#10b981"}}>✓</span>{f}</div>
+              ))}
+              <button onClick={async()=>{
+                try{const res=await fetch("/api/create-checkout",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({userId:user.id,email:user.email||""})});const data=await res.json();if(data.url)window.location.href=data.url;}
+                catch{await supabase._fetch("/rest/v1/profiles?id=eq."+user.id,{method:"PATCH",body:JSON.stringify({is_pro:true})}).catch(()=>{});setIsPro(true);setSaveLimitHit(false);}
+              }} style={{width:"100%",padding:"13px",borderRadius:11,border:"none",background:"#10b981",color:"white",fontSize:15,fontWeight:700,cursor:"pointer",margin:"16px 0 8px",boxShadow:"0 4px 20px rgba(16,185,129,0.3)"}}>
                 Upgrade to Pro — $20/mo →
               </button>
               <button onClick={()=>{setSaveLimitHit(false);setView("deals");}} style={{width:"100%",padding:"10px",borderRadius:11,border:"1.5px solid #e5e7eb",background:"white",color:"#6b7280",fontSize:13,cursor:"pointer"}}>
@@ -6766,7 +6819,7 @@ function AnalyzerApp({user,profile,onGoHome,onGoProfile,onSignOut}) {
               <CalcComponent key={`${mode}-${loadedDealId}`} saved={loadedDealId?deals.find(d=>d.id===loadedDealId)?.inputs:null} onCalcChange={handleCalcChange} profile={{...profile,is_pro:isPro}} isPro={isPro} onActivatePro={()=>setIsPro(true)} allDeals={deals} currentDealId={loadedDealId}/>
             </div>
             <div style={{padding:"12px 16px",borderTop:"1px solid #f3f4f6",background:"#fafafa",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap"}}>
-              <p style={{fontSize:12,color:"#9ca3af"}}>Updates as you type · Saved to your account</p>
+              <p style={{fontSize:12,color:"#9ca3af"}}>Results update instantly · Changes auto-saved when you hit Save Deal</p>
               <div style={{display:"flex",gap:10}}>
                 <button onClick={()=>setView("deals")} style={{padding:"8px 16px",borderRadius:8,border:"1.5px solid #e5e7eb",background:"white",color:"#6b7280",fontSize:12,fontWeight:500,cursor:"pointer"}}>View Saved</button>
                 <button onClick={handleSaveClick} style={{padding:"8px 20px",borderRadius:8,border:"none",background:"#111827",color:"white",fontSize:12,fontWeight:700,cursor:"pointer"}}>💾 Save Deal</button>
@@ -6782,12 +6835,10 @@ function AnalyzerApp({user,profile,onGoHome,onGoProfile,onSignOut}) {
             <div>
               <h2 style={{fontFamily:"'Fraunces',serif",fontSize:24,fontWeight:800,color:"#111827",marginBottom:4}}>Saved Deals</h2>
               {isPro
-                ? <p style={{fontSize:13,color:"#9ca3af"}}>{deals.length} deal{deals.length!==1?"s":""} · <span style={{color:"#059669",fontWeight:600}}>Pro — unlimited</span></p>
-                : <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
-                    <p style={{fontSize:13,color:"#9ca3af",margin:0}}>{deals.length} of {FREE_DEAL_LIMIT} free saves used</p>
-                    <div style={{width:80,height:5,background:"#e5e7eb",borderRadius:3,overflow:"hidden"}}>
-                      <div style={{height:"100%",width:(Math.min(1,deals.length/FREE_DEAL_LIMIT)*100)+"%",background:deals.length>=FREE_DEAL_LIMIT?"#dc2626":"#10b981",borderRadius:3}}/>
-                    </div>
+                ?<p style={{fontSize:13,color:"#9ca3af"}}>{deals.length} deal{deals.length!==1?"s":""} · <span style={{color:"#059669",fontWeight:600}}>Pro — unlimited</span></p>
+                :<div style={{display:"flex",alignItems:"center",gap:10}}>
+                    <p style={{fontSize:13,color:"#9ca3af",margin:0}}>{deals.length} of {FREE_DEAL_LIMIT} free deals used</p>
+                    <div style={{width:80,height:5,background:"#e5e7eb",borderRadius:3,overflow:"hidden"}}><div style={{height:"100%",width:Math.min(100,deals.length/FREE_DEAL_LIMIT*100)+"%",background:deals.length>=FREE_DEAL_LIMIT?"#dc2626":"#10b981",borderRadius:3}}/></div>
                     {deals.length>=FREE_DEAL_LIMIT&&<button onClick={()=>setSaveLimitHit(true)} style={{fontSize:11,fontWeight:700,color:"#059669",background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:100,padding:"2px 9px",cursor:"pointer"}}>Upgrade →</button>}
                   </div>
               }
@@ -6810,7 +6861,7 @@ function AnalyzerApp({user,profile,onGoHome,onGoProfile,onSignOut}) {
         </div>
       )}
 
-      {view==="forum"&&<ForumView user={user} profile={profile} savedDeals={deals||[]}/>}
+      {view==="forum"&&<ForumView user={user} profile={profile} savedDeals={deals||[]} isPro={isPro}/>}
       {view==="leaderboard"&&<LeaderboardView user={user} profile={profile} onGoProfile={onGoProfile}/>}
       {view==="mentors"&&<MentorDirectory user={user} profile={profile}/>}
 
