@@ -8025,6 +8025,6 @@ export default function Root() {
     {page==="signin"&&<SignInPage onSignIn={handleSignIn} onGoSignUp={()=>setPage("signup")} onGoHome={()=>setPage("home")}/>}
     {page==="signup"&&<SignUpPage onSignIn={handleSignIn} onGoSignIn={()=>setPage("signin")} onGoHome={()=>setPage("home")}/>}
     {page==="app"&&user&&<AnalyzerApp user={user} profile={profile} onGoHome={()=>setPage("home")} onGoProfile={()=>setPage("profile")} onSignOut={handleSignOut}/>}
-    {page==="profile"&&user&&<ProfilePage user={user} profile={profile} isPro={isPro} onActivatePro={()=>setIsPro(true)} onUpdate={handleProfileUpdate} onSignOut={handleSignOut} onBack={()=>setPage("app")}/>}
+    {page==="profile"&&user&&<ProfilePage user={user} profile={profile} isPro={profile?.is_pro||false} onActivatePro={()=>setProfile(p=>({...p,is_pro:true}))} onUpdate={handleProfileUpdate} onSignOut={handleSignOut} onBack={()=>setPage("app")}/>}
   </>);
 }
