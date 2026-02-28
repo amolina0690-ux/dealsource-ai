@@ -10,11 +10,18 @@ const supabase = {
     const headers = { "Content-Type": "application/json", "apikey": this._key, ...(this._token ? { "Authorization": `Bearer ${this._token}` } : {}), ...opts.headers };
     const res = await fetch(`${this._url}${path}`, { ...opts, headers });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error_description || data.message || "Request failed");
+    if (!res.ok) {
+      const msg = data.error_description || data.msg || data.message || data.error || `Server error (${res.status})`;
+      throw new Error(msg);
+    }
     return data;
   },
   auth: {
-    async signUp(email, password, meta = {}) { const d = await supabase._fetch("/auth/v1/signup", { method: "POST", body: JSON.stringify({ email, password, data: meta }) }); if (d.access_token) supabase._token = d.access_token; return d; },
+    async signUp(email, password, meta = {}) {
+      const d = await supabase._fetch("/auth/v1/signup", { method: "POST", body: JSON.stringify({ email, password, data: meta }) });
+      if (d.access_token) { supabase._token = d.access_token; try { localStorage.setItem("ds_token", d.access_token); } catch {} }
+      return d;
+    },
     async signIn(email, password) { const d = await supabase._fetch("/auth/v1/token?grant_type=password", { method: "POST", body: JSON.stringify({ email, password }) }); if (d.access_token) { supabase._token = d.access_token; try { localStorage.setItem("ds_token", d.access_token); } catch {} } return d; },
     async signOut() { try { await supabase._fetch("/auth/v1/logout", { method: "POST" }); } catch {} supabase._token = null; try { localStorage.removeItem("ds_token"); } catch {} },
     async getUser() { if (!supabase._token) return null; try { return await supabase._fetch("/auth/v1/user"); } catch { return null; } },
@@ -161,7 +168,11 @@ function Btn({children,onClick,variant="primary",loading,disabled,fullWidth,smal
   return <button type={type} onClick={onClick} disabled={disabled||loading} style={{...S[variant],padding:small?"7px 14px":"12px 24px",borderRadius:small?7:10,fontSize:small?12:14,fontWeight:700,cursor:disabled||loading?"default":"pointer",width:fullWidth?"100%":"auto",opacity:disabled?0.5:1,transition:"all 0.15s",display:"flex",alignItems:"center",justifyContent:"center",gap:8,whiteSpace:"nowrap"}}>{loading?<span style={{animation:"spin 0.8s linear infinite",display:"inline-block"}}>⟳</span>:children}</button>;
 }
 function Alert({type,children}) {
-  const s=type==="error"?{bg:"#fef2f2",border:"#fecaca",color:"#dc2626",icon:"⚠️"}:{bg:"#f0fdf4",border:"#bbf7d0",color:"#059669",icon:"✓"};
+  const s=type==="error"
+    ?{bg:"#fef2f2",border:"#fecaca",color:"#dc2626",icon:"⚠️"}
+    :type==="info"
+    ?{bg:"#eff6ff",border:"#bfdbfe",color:"#1d4ed8",icon:"ℹ️"}
+    :{bg:"#f0fdf4",border:"#bbf7d0",color:"#059669",icon:"✓"};
   return <div style={{display:"flex",alignItems:"flex-start",gap:10,padding:"12px 14px",background:s.bg,border:`1.5px solid ${s.border}`,borderRadius:10}}><span style={{fontSize:14}}>{s.icon}</span><p style={{fontSize:13,color:s.color,lineHeight:1.5,margin:0}}>{children}</p></div>;
 }
 function Toggle({value,onChange,label}) {
@@ -348,18 +359,16 @@ function SignUpPage({onSignIn,onGoSignIn,onGoHome}) {
     if(!skipPhone&&form.phone&&!/^\+?[\d\s\-().]{7,}$/.test(form.phone)){setErr("Enter a valid phone number or skip it.");return;}
     setLoading(true);setErr("");
     try{
-      // 1. Create auth user
+      // 1. Create the auth account
       const d=await supabase.auth.signUp(form.email,form.password,{full_name:form.full_name});
-      const uid=d.user?.id||d.id;
-      if(!uid) throw new Error("Account creation failed — no user ID returned. Please try again.");
 
-      // 2. Persist token immediately so profile upsert is authenticated
-      if(d.access_token){
-        supabase._token=d.access_token;
-        try{localStorage.setItem("ds_token",d.access_token);}catch{}
-      }
+      // Supabase returns either:
+      // A) { user, session, access_token } — confirmation disabled, user is live
+      // B) { user, session:null } — email confirmation required
+      const user=d.user||d;
+      const uid=user?.id;
+      if(!uid) throw new Error("Account creation failed. Please try again.");
 
-      // 3. Save profile (non-blocking — don't fail signup if this fails)
       const profile={
         id:uid,
         email:form.email,
@@ -377,23 +386,39 @@ function SignUpPage({onSignIn,onGoSignIn,onGoHome}) {
         upvotes_received:0,
         mentoring_sessions:0,
       };
-      await supabase.upsertProfile(profile).catch(()=>{
-        // Profile save failed (e.g. email confirmation required) — continue anyway
-        console.warn("Profile upsert failed, will retry on next login");
+
+      // Case B: email confirmation required — no token, can't write to DB yet
+      // Show confirmation message and don't try to log in
+      const needsConfirmation = !d.access_token && !supabase._token;
+      if(needsConfirmation){
+        setLoading(false);
+        setErr(""); // clear any error
+        // Show success message on step 1 so user knows what happened
+        setStep(1);
+        setForm(p=>({...p, _confirmed:false}));
+        // Use the error Alert to show a success/info message
+        setErr("✅ Account created! Check your email and click the confirmation link, then come back to sign in.");
+        return;
+      }
+
+      // Case A: token available, save profile and log in
+      await supabase.upsertProfile(profile).catch(e=>{
+        console.warn("Profile save failed:", e.message);
       });
 
-      onSignIn(d.user||d, profile);
+      onSignIn(user, profile);
     }catch(e){
       const msg=e.message||"";
-      if(msg.includes("already registered")||msg.includes("already exists")){
+      if(msg.includes("already registered")||msg.includes("already exists")||msg.includes("User already registered")){
         setErr("An account with this email already exists. Try signing in instead.");
-      } else if(msg.includes("email")){
-        setErr("Invalid email address. Please check and try again.");
+      } else if(msg.includes("Password should")||msg.includes("password")){
+        setErr("Password is too weak. Use at least 8 characters with a mix of letters and numbers.");
+      } else if(msg.includes("valid email")||msg.includes("invalid email")){
+        setErr("Please enter a valid email address.");
         setStep(1);
       } else {
         setErr(msg||"Sign up failed. Please try again.");
       }
-      setStep(1);
     }finally{setLoading(false);}
   };
 
@@ -407,7 +432,7 @@ function SignUpPage({onSignIn,onGoSignIn,onGoHome}) {
         </div>))}
       </div>
       <div style={{display:"flex",flexDirection:"column",gap:14}}>
-        {err&&<Alert type="error">{err}</Alert>}
+        {err&&<Alert type={err.startsWith("✅")?"info":"error"}>{err}</Alert>}
         {step===1&&(<>
           <Input label="Email" type="email" value={form.email} onChange={f("email")} placeholder="you@example.com" icon="📧"/>
           <Input label="Password" type="password" value={form.password} onChange={f("password")} placeholder="Min. 8 characters" icon="🔒"/>
