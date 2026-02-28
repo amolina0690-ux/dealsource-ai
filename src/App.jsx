@@ -1854,11 +1854,41 @@ function RentalCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro,al
       <AddressBar value={addr} onChange={setAddr}/>
 
       {/* ── Empty state ── */}
-      {!hasData&&(
-        <div style={{background:"#f8fafc",border:"1.5px dashed #e5e7eb",borderRadius:12,padding:"16px 20px",marginBottom:12,textAlign:"center"}}>
-          <span style={{fontSize:12,color:"#9ca3af"}}>Fill in the fields below to see your analysis ↓</span>
+      {/* ══ INPUTS (full-width below verdict) ══════════════════════════════════ */}
+      <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:16}}>
+        <InputSection title="Acquisition" accent="#10b981" defaultOpen badge={`${fmtD(c.effPP)} · ${fmtD(mort)}/mo`}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+            <NF label="Purchase Price" value={i.pp} onChange={sv("pp")} prefix="$" step={5000}/>
+            <NF label="Down %" value={i.down} onChange={sv("down")} suffix="%" step={1}/>
+            <NF label="Rate %" value={i.rate} onChange={sv("rate")} suffix="%" step={0.125}/>
+            <NF label="Term" value={i.term} onChange={sv("term")} suffix="yr" step={5}/>
+            <NF label="Closing $" value={i.cc} onChange={sv("cc")} prefix="$" step={500}/>
+            <NF label="Rehab" value={i.rehab} onChange={sv("rehab")} prefix="$" step={1000}/>
+          </div>
+          <div style={{display:"flex",justifyContent:"space-between",padding:"7px 10px",background:"#f0fdf4",borderRadius:8,marginTop:6,border:"1px solid #bbf7d0"}}>
+            <span style={{fontSize:10,color:"#6b7280"}}>{fmtD(c.loan)} loan · {i.rate}% · {i.term}yr</span>
+            <span style={{fontSize:14,fontWeight:800,fontFamily:"'DM Mono',monospace",color:"#059669"}}>{fmtD(mort)}/mo</span>
+          </div>
+        </InputSection>
+
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+          <InputSection title="Income" accent="#10b981" defaultOpen badge={`${fmtD(c.effRent)}/mo`}>
+            <NF label="Monthly Rent" value={i.rent} onChange={sv("rent")} prefix="$" step={50}/>
+            <NF label="Other Income" value={i.otherIncome||0} onChange={sv("otherIncome")} prefix="$" step={25}/>
+          </InputSection>
+          <InputSection title="Growth" accent="#7c3aed" defaultOpen>
+            <NF label="Appreciation %" value={i.appreciation||3} onChange={sv("appreciation")} suffix="%" step={0.5}/>
+            <NF label="Rent Growth %" value={i.rentGrowth||2} onChange={sv("rentGrowth")} suffix="%" step={0.5}/>
+            <NF label="Exp. Inflation %" value={i.expenseGrowth||2} onChange={sv("expenseGrowth")} suffix="%" step={0.5}/>
+          </InputSection>
         </div>
-      )}
+
+        <InputSection title="Operating Expenses" accent="#6b7280" defaultOpen={false} badge={`${fmtD(totalExp)}/mo`}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:8}}>
+            {[["Taxes",sv("taxes"),i.taxes,25],["Insurance",sv("insurance"),i.insurance,10],["Vacancy",sv("vacancy"),i.vacancy,25],["Repairs",sv("repairs"),i.repairs,25],["CapEx",sv("capex"),i.capex,25],["Mgmt",sv("mgmt"),i.mgmt,25],["Utilities",sv("utilities"),i.utilities,25],["HOA",sv("hoa"),i.hoa,25]]
+            .map(([l,fn,v,s])=><NF key={l} label={l} value={v} onChange={fn} prefix="$" step={s}/>)}
+          </div>
+        </InputSection>
       {hasData&&<>
       {/* ══════════════════════════════════════════════════════════════════════
           SECTION 1 — DEAL VERDICT (Dominant Anchor, Non-Negotiable)
@@ -1940,42 +1970,7 @@ function RentalCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro,al
         </div>
       </div>
 
-      {/* ══ INPUTS (full-width below verdict) ══════════════════════════════════ */}
-      <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:16}}>
-        <InputSection title="Acquisition" accent="#10b981" defaultOpen badge={`${fmtD(c.effPP)} · ${fmtD(mort)}/mo`}>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
-            <NF label="Purchase Price" value={i.pp} onChange={sv("pp")} prefix="$" step={5000}/>
-            <NF label="Down %" value={i.down} onChange={sv("down")} suffix="%" step={1}/>
-            <NF label="Rate %" value={i.rate} onChange={sv("rate")} suffix="%" step={0.125}/>
-            <NF label="Term" value={i.term} onChange={sv("term")} suffix="yr" step={5}/>
-            <NF label="Closing $" value={i.cc} onChange={sv("cc")} prefix="$" step={500}/>
-            <NF label="Rehab" value={i.rehab} onChange={sv("rehab")} prefix="$" step={1000}/>
-          </div>
-          <div style={{display:"flex",justifyContent:"space-between",padding:"7px 10px",background:"#f0fdf4",borderRadius:8,marginTop:6,border:"1px solid #bbf7d0"}}>
-            <span style={{fontSize:10,color:"#6b7280"}}>{fmtD(c.loan)} loan · {i.rate}% · {i.term}yr</span>
-            <span style={{fontSize:14,fontWeight:800,fontFamily:"'DM Mono',monospace",color:"#059669"}}>{fmtD(mort)}/mo</span>
-          </div>
-        </InputSection>
-
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-          <InputSection title="Income" accent="#10b981" defaultOpen badge={`${fmtD(c.effRent)}/mo`}>
-            <NF label="Monthly Rent" value={i.rent} onChange={sv("rent")} prefix="$" step={50}/>
-            <NF label="Other Income" value={i.otherIncome||0} onChange={sv("otherIncome")} prefix="$" step={25}/>
-          </InputSection>
-          <InputSection title="Growth" accent="#7c3aed" defaultOpen>
-            <NF label="Appreciation %" value={i.appreciation||3} onChange={sv("appreciation")} suffix="%" step={0.5}/>
-            <NF label="Rent Growth %" value={i.rentGrowth||2} onChange={sv("rentGrowth")} suffix="%" step={0.5}/>
-            <NF label="Exp. Inflation %" value={i.expenseGrowth||2} onChange={sv("expenseGrowth")} suffix="%" step={0.5}/>
-          </InputSection>
-        </div>
-
-        <InputSection title="Operating Expenses" accent="#6b7280" defaultOpen={false} badge={`${fmtD(totalExp)}/mo`}>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:8}}>
-            {[["Taxes",sv("taxes"),i.taxes,25],["Insurance",sv("insurance"),i.insurance,10],["Vacancy",sv("vacancy"),i.vacancy,25],["Repairs",sv("repairs"),i.repairs,25],["CapEx",sv("capex"),i.capex,25],["Mgmt",sv("mgmt"),i.mgmt,25],["Utilities",sv("utilities"),i.utilities,25],["HOA",sv("hoa"),i.hoa,25]]
-            .map(([l,fn,v,s])=><NF key={l} label={l} value={v} onChange={fn} prefix="$" step={s}/>)}
-          </div>
-        </InputSection>
-      </div>
+            </div>
 
       {/* ══════════════════════════════════════════════════════════════════════
           SECTION 2 — STABILITY (Survival Under Stress)
@@ -2561,11 +2556,38 @@ function WholesaleCalc({saved,onCalcChange,isPro:isProProp,onActivatePro}) {
 
   return (<>
     <AddressBar value={addr} onChange={setAddr}/>
-    {!wsHasData&&(
-        <div style={{background:"#f8fafc",border:"1.5px dashed #e5e7eb",borderRadius:12,padding:"16px 20px",marginBottom:12,textAlign:"center"}}>
-          <span style={{fontSize:12,color:"#9ca3af"}}>Fill in the fields below to see your analysis ↓</span>
+    {/* INPUTS */}
+    <div style={{marginBottom:14}}>
+      <InputSection title="Deal Details" accent="#2563eb" defaultOpen>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+          <Field label="ARV" value={i.arv} onChange={s("arv")} prefix="$" step={5000}/>
+          <Field label="Repairs" value={i.repairs} onChange={s("repairs")} prefix="$" step={1000}/>
+          <Field label="Wholesale Fee" value={i.fee} onChange={s("fee")} prefix="$" step={500}/>
+          {!advMode&&<Field label="Max Offer %" value={i.pct} onChange={s("pct")} suffix="%" step={1}/>}
         </div>
-      )}
+        {advMode&&(
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:8}}>
+            <Field label="Holding Costs" value={i.holding} onChange={s("holding")} prefix="$" step={500}/>
+            <Field label="Closing Costs" value={i.closing} onChange={s("closing")} prefix="$" step={500}/>
+            <div style={{gridColumn:"1/-1"}}>
+              <div style={{display:"flex",gap:6,marginBottom:6}}>
+                {[["fixed","Fixed $"],["pct","% of ARV"]].map(([m,lbl])=>(
+                  <button key={m} onClick={()=>setProfitMode(m)} style={{padding:"4px 10px",borderRadius:100,border:`1.5px solid ${profitMode===m?"#2563eb":"#e5e7eb"}`,background:profitMode===m?"#eff6ff":"white",color:profitMode===m?"#2563eb":"#6b7280",fontSize:10,fontWeight:700,cursor:"pointer"}}>{lbl}</button>
+                ))}
+              </div>
+              {profitMode==="fixed"
+                ?<Field label="Target Investor Profit ($)" value={i.profitTarget} onChange={s("profitTarget")} prefix="$" step={1000}/>
+                :<Field label="Target Investor Profit (%)" value={i.profitPct} onChange={s("profitPct")} suffix="%" step={1}/>
+              }
+            </div>
+          </div>
+        )}
+        <div style={{marginTop:8}}>
+          <button onClick={()=>setAdvMode(a=>!a)} style={{padding:"5px 14px",borderRadius:100,border:"1.5px solid #e5e7eb",background:"white",color:"#6b7280",fontSize:10,fontWeight:600,cursor:"pointer"}}>
+            {advMode?"↑ Basic Mode":"↓ Advanced Mode"}
+          </button>
+        </div>
+      </InputSection>
     {wsHasData&&<>
     {/* SECTION 1 — DEAL VERDICT */}
     <UniversalVerdictHeader
@@ -2616,39 +2638,7 @@ function WholesaleCalc({saved,onCalcChange,isPro:isProProp,onActivatePro}) {
       </div>
     </div>
 
-    {/* INPUTS */}
-    <div style={{marginBottom:14}}>
-      <InputSection title="Deal Details" accent="#2563eb" defaultOpen>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-          <Field label="ARV" value={i.arv} onChange={s("arv")} prefix="$" step={5000}/>
-          <Field label="Repairs" value={i.repairs} onChange={s("repairs")} prefix="$" step={1000}/>
-          <Field label="Wholesale Fee" value={i.fee} onChange={s("fee")} prefix="$" step={500}/>
-          {!advMode&&<Field label="Max Offer %" value={i.pct} onChange={s("pct")} suffix="%" step={1}/>}
         </div>
-        {advMode&&(
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:8}}>
-            <Field label="Holding Costs" value={i.holding} onChange={s("holding")} prefix="$" step={500}/>
-            <Field label="Closing Costs" value={i.closing} onChange={s("closing")} prefix="$" step={500}/>
-            <div style={{gridColumn:"1/-1"}}>
-              <div style={{display:"flex",gap:6,marginBottom:6}}>
-                {[["fixed","Fixed $"],["pct","% of ARV"]].map(([m,lbl])=>(
-                  <button key={m} onClick={()=>setProfitMode(m)} style={{padding:"4px 10px",borderRadius:100,border:`1.5px solid ${profitMode===m?"#2563eb":"#e5e7eb"}`,background:profitMode===m?"#eff6ff":"white",color:profitMode===m?"#2563eb":"#6b7280",fontSize:10,fontWeight:700,cursor:"pointer"}}>{lbl}</button>
-                ))}
-              </div>
-              {profitMode==="fixed"
-                ?<Field label="Target Investor Profit ($)" value={i.profitTarget} onChange={s("profitTarget")} prefix="$" step={1000}/>
-                :<Field label="Target Investor Profit (%)" value={i.profitPct} onChange={s("profitPct")} suffix="%" step={1}/>
-              }
-            </div>
-          </div>
-        )}
-        <div style={{marginTop:8}}>
-          <button onClick={()=>setAdvMode(a=>!a)} style={{padding:"5px 14px",borderRadius:100,border:"1.5px solid #e5e7eb",background:"white",color:"#6b7280",fontSize:10,fontWeight:600,cursor:"pointer"}}>
-            {advMode?"↑ Basic Mode":"↓ Advanced Mode"}
-          </button>
-        </div>
-      </InputSection>
-    </div>
 
     {/* SECTION 2 — STABILITY (spread protection / stress) */}
     <SectionCard title="Stability" subtitle="Spread protection under stress — fragility only" badge={wsRisk.verdict} badgeColor={wsRisk.vColor}>
@@ -2903,11 +2893,29 @@ function FlipCalc({saved,onCalcChange,isPro:isProProp,onActivatePro}) {
 
   return (<>
     <AddressBar value={addr} onChange={setAddr}/>
-    {!flipHasData&&(
-        <div style={{background:"#f8fafc",border:"1.5px dashed #e5e7eb",borderRadius:12,padding:"16px 20px",marginBottom:12,textAlign:"center"}}>
-          <span style={{fontSize:12,color:"#9ca3af"}}>Fill in the fields below to see your analysis ↓</span>
-        </div>
-      )}
+    {/* INPUTS */}
+    <InputSection title="Deal Numbers" accent="#7c3aed" defaultOpen badge={`Profit: ${fmtD(c.profit)}`}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+        <Field label="ARV" value={i.arv} onChange={s("arv")} prefix="$" step={5000}/>
+        <Field label="Purchase Price" value={i.pp} onChange={s("pp")} prefix="$" step={5000}/>
+        <Field label="Rehab Budget" value={i.repairs} onChange={s("repairs")} prefix="$" step={1000}/>
+        <Field label="Holding Costs" value={i.holding} onChange={s("holding")} prefix="$" step={500}/>
+        <Field label="Closing Costs" value={i.closing} onChange={s("closing")} prefix="$" step={500}/>
+        <Field label="Finance Costs" value={i.finance} onChange={s("finance")} prefix="$" step={500}/>
+        <Field label="Duration (mo)" value={i.duration} onChange={s("duration")} suffix="mo" step={1}/>
+        <Field label="EMD" value={i.emd} onChange={s("emd")} prefix="$" step={500}/>
+      </div>
+      <div style={{marginTop:8,display:"flex",gap:6,alignItems:"center"}}>
+        <span style={{fontSize:10,color:"#6b7280"}}>EMD:</span>
+        {[true,false].map(ref=>(
+          <button key={String(ref)} onClick={()=>s("emdRefundable")(ref)}
+            style={{padding:"4px 10px",borderRadius:100,border:`1.5px solid ${i.emdRefundable===ref?emdRisk.col:"#e5e7eb"}`,background:i.emdRefundable===ref?emdRisk.col+"15":"white",color:i.emdRefundable===ref?emdRisk.col:"#6b7280",fontSize:10,fontWeight:700,cursor:"pointer"}}>
+            {ref?"Refundable":"Non-Refundable"}
+          </button>
+        ))}
+        <span style={{fontSize:9,fontWeight:700,color:emdRisk.col,background:emdRisk.col+"15",padding:"2px 8px",borderRadius:100}}>{emdRisk.level} EMD Risk</span>
+      </div>
+    </InputSection>
     {flipHasData&&<>
     {/* SECTION 1 — DEAL VERDICT */}
     <UniversalVerdictHeader
@@ -2957,30 +2965,7 @@ function FlipCalc({saved,onCalcChange,isPro:isProProp,onActivatePro}) {
       </div>
     </div>
 
-    {/* INPUTS */}
-    <InputSection title="Deal Numbers" accent="#7c3aed" defaultOpen badge={`Profit: ${fmtD(c.profit)}`}>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-        <Field label="ARV" value={i.arv} onChange={s("arv")} prefix="$" step={5000}/>
-        <Field label="Purchase Price" value={i.pp} onChange={s("pp")} prefix="$" step={5000}/>
-        <Field label="Rehab Budget" value={i.repairs} onChange={s("repairs")} prefix="$" step={1000}/>
-        <Field label="Holding Costs" value={i.holding} onChange={s("holding")} prefix="$" step={500}/>
-        <Field label="Closing Costs" value={i.closing} onChange={s("closing")} prefix="$" step={500}/>
-        <Field label="Finance Costs" value={i.finance} onChange={s("finance")} prefix="$" step={500}/>
-        <Field label="Duration (mo)" value={i.duration} onChange={s("duration")} suffix="mo" step={1}/>
-        <Field label="EMD" value={i.emd} onChange={s("emd")} prefix="$" step={500}/>
-      </div>
-      <div style={{marginTop:8,display:"flex",gap:6,alignItems:"center"}}>
-        <span style={{fontSize:10,color:"#6b7280"}}>EMD:</span>
-        {[true,false].map(ref=>(
-          <button key={String(ref)} onClick={()=>s("emdRefundable")(ref)}
-            style={{padding:"4px 10px",borderRadius:100,border:`1.5px solid ${i.emdRefundable===ref?emdRisk.col:"#e5e7eb"}`,background:i.emdRefundable===ref?emdRisk.col+"15":"white",color:i.emdRefundable===ref?emdRisk.col:"#6b7280",fontSize:10,fontWeight:700,cursor:"pointer"}}>
-            {ref?"Refundable":"Non-Refundable"}
-          </button>
-        ))}
-        <span style={{fontSize:9,fontWeight:700,color:emdRisk.col,background:emdRisk.col+"15",padding:"2px 8px",borderRadius:100}}>{emdRisk.level} EMD Risk</span>
-      </div>
-    </InputSection>
-
+    
     {/* SECTION 2 — STABILITY */}
     <SectionCard title="Stability" subtitle="Profit survival under stress — fragility only" badge={flipRisk.verdict} badgeColor={flipRisk.vColor}>
       <MetricGrid items={[
@@ -3208,11 +3193,20 @@ function BRRRRCalc({saved,onCalcChange,isPro:isProProp,onActivatePro}) {
 
   return (<>
     <AddressBar value={addr} onChange={setAddr}/>
-    {!brrrrHasData&&(
-        <div style={{background:"#f8fafc",border:"1.5px dashed #e5e7eb",borderRadius:12,padding:"16px 20px",marginBottom:12,textAlign:"center"}}>
-          <span style={{fontSize:12,color:"#9ca3af"}}>Fill in the fields below to see your analysis ↓</span>
-        </div>
-      )}
+    {/* INPUTS */}
+    <InputSection title="Deal & Refinance" accent="#059669" defaultOpen>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+        <Field label="Purchase Price" value={i.pp} onChange={s("pp")} prefix="$" step={5000}/>
+        <Field label="Rehab Budget" value={i.repairs} onChange={s("repairs")} prefix="$" step={1000}/>
+        <Field label="ARV" value={i.arv} onChange={s("arv")} prefix="$" step={5000}/>
+        <Field label="Holding Costs" value={i.holding} onChange={s("holding")} prefix="$" step={500}/>
+        <Field label="Refi LTV %" value={i.refiLtv} onChange={s("refiLtv")} suffix="%" step={1}/>
+        <Field label="Refi Rate %" value={i.refiRate} onChange={s("refiRate")} suffix="%" step={0.125}/>
+        <Field label="Refi Term" value={i.refiTerm} onChange={s("refiTerm")} suffix="yr" step={5}/>
+        <Field label="Monthly Rent" value={i.rent} onChange={s("rent")} prefix="$" step={50}/>
+        <Field label="Expenses" value={i.expenses} onChange={s("expenses")} prefix="$" step={50}/>
+      </div>
+    </InputSection>
     {brrrrHasData&&<>
     {/* SECTION 1 — DEAL VERDICT */}
     <UniversalVerdictHeader
@@ -3256,21 +3250,7 @@ function BRRRRCalc({saved,onCalcChange,isPro:isProProp,onActivatePro}) {
       </div>}
     </div>
 
-    {/* INPUTS */}
-    <InputSection title="Deal & Refinance" accent="#059669" defaultOpen>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-        <Field label="Purchase Price" value={i.pp} onChange={s("pp")} prefix="$" step={5000}/>
-        <Field label="Rehab Budget" value={i.repairs} onChange={s("repairs")} prefix="$" step={1000}/>
-        <Field label="ARV" value={i.arv} onChange={s("arv")} prefix="$" step={5000}/>
-        <Field label="Holding Costs" value={i.holding} onChange={s("holding")} prefix="$" step={500}/>
-        <Field label="Refi LTV %" value={i.refiLtv} onChange={s("refiLtv")} suffix="%" step={1}/>
-        <Field label="Refi Rate %" value={i.refiRate} onChange={s("refiRate")} suffix="%" step={0.125}/>
-        <Field label="Refi Term" value={i.refiTerm} onChange={s("refiTerm")} suffix="yr" step={5}/>
-        <Field label="Monthly Rent" value={i.rent} onChange={s("rent")} prefix="$" step={50}/>
-        <Field label="Expenses" value={i.expenses} onChange={s("expenses")} prefix="$" step={50}/>
-      </div>
-    </InputSection>
-
+    
     {/* SECTION 2 — STABILITY */}
     <SectionCard title="Stability" subtitle="Refinance fragility + DSCR + ARV sensitivity" badge={brrrRisk.verdict} badgeColor={brrrRisk.vColor}>
       <MetricGrid items={[
@@ -3543,11 +3523,19 @@ function SubToCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro}) {
 
   return (<>
     <AddressBar value={addr} onChange={setAddr}/>
-    {!subtoHasData&&(
-        <div style={{background:"#f8fafc",border:"1.5px dashed #e5e7eb",borderRadius:12,padding:"16px 20px",marginBottom:12,textAlign:"center"}}>
-          <span style={{fontSize:12,color:"#9ca3af"}}>Fill in the fields below to see your analysis ↓</span>
-        </div>
-      )}
+    {/* INPUTS */}
+    <InputSection title="Subject-To Details" accent="#7c3aed" defaultOpen>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+        <Field label="Purchase Price" value={i.pp} onChange={s("pp")} prefix="$" step={5000}/>
+        <Field label="Existing Balance" value={i.existingBalance} onChange={s("existingBalance")} prefix="$" step={5000}/>
+        <Field label="Existing Rate %" value={i.existingRate} onChange={s("existingRate")} suffix="%" step={0.125}/>
+        <Field label="Market Rate %" value={i.marketRate} onChange={s("marketRate")} suffix="%" step={0.125}/>
+        <Field label="Monthly P&I" value={i.monthlyPiti} onChange={s("monthlyPiti")} prefix="$" step={25}/>
+        <Field label="Capital In" value={i.capitalIn} onChange={s("capitalIn")} prefix="$" step={1000}/>
+        <Field label="Monthly Rent" value={i.rent} onChange={s("rent")} prefix="$" step={50}/>
+        <Field label="Expenses" value={i.expenses} onChange={s("expenses")} prefix="$" step={25}/>
+      </div>
+    </InputSection>
     {subtoHasData&&<>
     {/* SECTION 1 — DEAL VERDICT */}
     <UniversalVerdictHeader
@@ -3596,20 +3584,7 @@ function SubToCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro}) {
       </div>
     </div>
 
-    {/* INPUTS */}
-    <InputSection title="Subject-To Details" accent="#7c3aed" defaultOpen>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-        <Field label="Purchase Price" value={i.pp} onChange={s("pp")} prefix="$" step={5000}/>
-        <Field label="Existing Balance" value={i.existingBalance} onChange={s("existingBalance")} prefix="$" step={5000}/>
-        <Field label="Existing Rate %" value={i.existingRate} onChange={s("existingRate")} suffix="%" step={0.125}/>
-        <Field label="Market Rate %" value={i.marketRate} onChange={s("marketRate")} suffix="%" step={0.125}/>
-        <Field label="Monthly P&I" value={i.monthlyPiti} onChange={s("monthlyPiti")} prefix="$" step={25}/>
-        <Field label="Capital In" value={i.capitalIn} onChange={s("capitalIn")} prefix="$" step={1000}/>
-        <Field label="Monthly Rent" value={i.rent} onChange={s("rent")} prefix="$" step={50}/>
-        <Field label="Expenses" value={i.expenses} onChange={s("expenses")} prefix="$" step={25}/>
-      </div>
-    </InputSection>
-
+    
     {/* SECTION 2 — STABILITY (DSCR / DOS / thin cash flow fragility) */}
     <SectionCard title="Stability" subtitle="DSCR fragility · Due-on-sale risk · Cash flow durability" badge={subtoRisk.verdict} badgeColor={subtoRisk.vColor}>
       <MetricGrid items={[
@@ -3841,11 +3816,18 @@ function NovationCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro}
 
   return (<>
     <AddressBar value={addr} onChange={setAddr}/>
-    {!novHasData&&(
-        <div style={{background:"#f8fafc",border:"1.5px dashed #e5e7eb",borderRadius:12,padding:"16px 20px",marginBottom:12,textAlign:"center"}}>
-          <span style={{fontSize:12,color:"#9ca3af"}}>Fill in the fields below to see your analysis ↓</span>
-        </div>
-      )}
+    {/* INPUTS */}
+    <InputSection title="Novation Deal Details" accent="#be185d" defaultOpen badge={`Profit: ${fmtD(c.profit)}`}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+        <Field label="ARV" value={i.arv} onChange={s("arv")} prefix="$" step={5000}/>
+        <Field label="Seller Payout" value={i.sellerPayout} onChange={s("sellerPayout")} prefix="$" step={5000}/>
+        <Field label="Repairs" value={i.repairs} onChange={s("repairs")} prefix="$" step={500}/>
+        <Field label="Holding Costs" value={i.holding} onChange={s("holding")} prefix="$" step={500}/>
+        <Field label="Closing Costs" value={i.closing} onChange={s("closing")} prefix="$" step={500}/>
+        <Field label="Capital In" value={i.capitalIn} onChange={s("capitalIn")} prefix="$" step={500}/>
+        <Field label="Timeline (mo)" value={i.duration} onChange={s("duration")} suffix="mo" step={1}/>
+      </div>
+    </InputSection>
     {novHasData&&<>
     {/* SECTION 1 — DEAL VERDICT */}
     <UniversalVerdictHeader
@@ -3895,19 +3877,7 @@ function NovationCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro}
       </div>
     </div>
 
-    {/* INPUTS */}
-    <InputSection title="Novation Deal Details" accent="#be185d" defaultOpen badge={`Profit: ${fmtD(c.profit)}`}>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-        <Field label="ARV" value={i.arv} onChange={s("arv")} prefix="$" step={5000}/>
-        <Field label="Seller Payout" value={i.sellerPayout} onChange={s("sellerPayout")} prefix="$" step={5000}/>
-        <Field label="Repairs" value={i.repairs} onChange={s("repairs")} prefix="$" step={500}/>
-        <Field label="Holding Costs" value={i.holding} onChange={s("holding")} prefix="$" step={500}/>
-        <Field label="Closing Costs" value={i.closing} onChange={s("closing")} prefix="$" step={500}/>
-        <Field label="Capital In" value={i.capitalIn} onChange={s("capitalIn")} prefix="$" step={500}/>
-        <Field label="Timeline (mo)" value={i.duration} onChange={s("duration")} suffix="mo" step={1}/>
-      </div>
-    </InputSection>
-
+    
     {/* SECTION 2 — STABILITY (retail friction + ARV + timeline exposure) */}
     <SectionCard title="Stability" subtitle="Retail friction · ARV compression · Timeline exposure" badge={novRisk.verdict} badgeColor={novRisk.vColor}>
       <MetricGrid items={[
