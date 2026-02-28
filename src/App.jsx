@@ -2298,10 +2298,10 @@ function RentalCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro,al
           </div>
         </div>
       </div>
+      )}
 
       {/* ══════════════════════════════════════════════════════════════════════
-               )}
- SECTION 3 — CAPITAL EFFICIENCY
+                SECTION 3 — CAPITAL EFFICIENCY
           Answers: "How efficiently does capital grow?"
           No risk duplication here.
       ══════════════════════════════════════════════════════════════════════ */}
