@@ -17,8 +17,8 @@ const supabase = {
     return data;
   },
   auth: {
-    async signUp(email, password, meta = {}) {
-      const d = await supabase._fetch("/auth/v1/signup", { method: "POST", body: JSON.stringify({ email, password, data: meta }) });
+    async signUp(email, password) {
+      const d = await supabase._fetch("/auth/v1/signup", { method: "POST", body: JSON.stringify({ email, password }) });
       if (d.access_token) { supabase._token = d.access_token; try { localStorage.setItem("ds_token", d.access_token); } catch {} }
       return d;
     },
@@ -360,7 +360,7 @@ function SignUpPage({onSignIn,onGoSignIn,onGoHome}) {
     setLoading(true);setErr("");
     try{
       // 1. Create the auth account
-      const d=await supabase.auth.signUp(form.email,form.password,{full_name:form.full_name});
+      const d=await supabase.auth.signUp(form.email,form.password);
 
       // Supabase returns either:
       // A) { user, session, access_token } — confirmation disabled, user is live
@@ -2208,7 +2208,26 @@ function RentalCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro,al
           Answers: "Does this deal survive stress?"
           Fragility metrics ONLY — no profit / ROI metrics here.
       ══════════════════════════════════════════════════════════════════════ */}
-      <div style={{background:"white",borderRadius:16,border:"1.5px solid #e5e7eb",boxShadow:"0 1px 4px rgba(0,0,0,0.04)",marginBottom:12,overflow:"hidden"}}>
+            {/* ── Stability Teaser (Free) ── */}
+      {!isPro&&(
+        <div style={{background:"white",borderRadius:16,border:"1.5px solid #e5e7eb",boxShadow:"0 1px 4px rgba(0,0,0,0.04)",marginBottom:12,overflow:"hidden"}}>
+          <div style={{padding:"12px 18px",borderBottom:"1px solid #f3f4f6",display:"flex",alignItems:"center",justifyContent:"space-between",background:"#fafafa"}}>
+            <div>
+              <div style={{fontSize:11,fontWeight:800,color:"#111827",textTransform:"uppercase",letterSpacing:"0.07em"}}>Stability Analysis</div>
+              <div style={{fontSize:10,color:"#9ca3af",marginTop:1}}>Stress tests · DSCR · Fragility breakdown</div>
+            </div>
+            <span style={{fontSize:9,fontWeight:700,color:"#f59e0b",background:"#fffbeb",border:"1px solid #fde68a",padding:"3px 10px",borderRadius:100,textTransform:"uppercase",letterSpacing:"0.07em"}}>🔒 Pro</span>
+          </div>
+          <div style={{padding:"16px 18px",textAlign:"center"}}>
+            <div style={{fontSize:28,marginBottom:8}}>🛡️</div>
+            <div style={{fontSize:13,fontWeight:700,color:"#111827",marginBottom:6}}>Can this deal survive a vacancy spike or rate increase?</div>
+            <div style={{fontSize:12,color:"#6b7280",marginBottom:14,maxWidth:360,margin:"0 auto 14px"}}>Unlock DSCR breakdown, stress test scenarios, break-even occupancy, and fragility scoring.</div>
+            <button onClick={()=>onActivatePro&&onActivatePro()} style={{padding:"9px 20px",borderRadius:8,border:"none",background:"linear-gradient(135deg,#064e3b,#065f46)",color:"white",fontSize:12,fontWeight:700,cursor:"pointer"}}>Upgrade to Pro — $20/mo →</button>
+          </div>
+        </div>
+      )}
+      {isPro&&(
+<div style={{background:"white",borderRadius:16,border:"1.5px solid #e5e7eb",boxShadow:"0 1px 4px rgba(0,0,0,0.04)",marginBottom:12,overflow:"hidden"}}>
         {/* Header */}
         <div style={{padding:"14px 18px",borderBottom:"1px solid #f3f4f6",display:"flex",justifyContent:"space-between",alignItems:"center",background:"#fafafa"}}>
           <div>
@@ -2281,7 +2300,8 @@ function RentalCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro,al
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════════
-          SECTION 3 — CAPITAL EFFICIENCY
+               )}
+ SECTION 3 — CAPITAL EFFICIENCY
           Answers: "How efficiently does capital grow?"
           No risk duplication here.
       ══════════════════════════════════════════════════════════════════════ */}
@@ -2635,14 +2655,25 @@ function UniversalVerdictHeader({verdict, vIcon, vColor, score, confidence, prim
           <div style={{fontSize:32,fontWeight:900,color:vColor,lineHeight:1,marginBottom:6,letterSpacing:"-0.02em"}}>{vIcon} {verdict}</div>
           {primaryRisk&&<div style={{fontSize:10,color:"rgba(255,255,255,0.4)"}}>Primary risk: <span style={{color:"rgba(255,255,255,0.6)",fontWeight:600}}>{primaryRisk}</span></div>}
         </div>
-        <div style={{background:"rgba(255,255,255,0.06)",borderRadius:12,padding:"10px 16px",textAlign:"center",border:`1px solid ${vColor}25`,flexShrink:0}}>
-          <div style={{fontSize:8,color:"rgba(255,255,255,0.3)",textTransform:"uppercase",fontWeight:700,letterSpacing:"0.08em",marginBottom:4}}>Score</div>
-          <div style={{fontSize:28,fontWeight:900,color:vColor,fontFamily:"'DM Mono',monospace",lineHeight:1}}>{score}</div>
-          {confidence&&<div style={{fontSize:8,color:"rgba(255,255,255,0.25)",marginTop:3}}>{confidence} conf.</div>}
+        {isPro ? (
+        <>
+          <div style={{background:"rgba(255,255,255,0.06)",borderRadius:12,padding:"10px 16px",textAlign:"center",border:`1px solid ${vColor}25`,flexShrink:0}}>
+            <div style={{fontSize:8,color:"rgba(255,255,255,0.3)",textTransform:"uppercase",fontWeight:700,letterSpacing:"0.08em",marginBottom:4}}>Score</div>
+            <div style={{fontSize:28,fontWeight:900,color:vColor,fontFamily:"'DM Mono',monospace",lineHeight:1}}>{score}</div>
+            {confidence&&<div style={{fontSize:8,color:"rgba(255,255,255,0.25)",marginTop:3}}>{confidence} conf.</div>}
+          </div>
+        </>
+      ) : (
+        <div onClick={()=>onActivatePro&&onActivatePro()} style={{background:"rgba(255,255,255,0.04)",borderRadius:12,padding:"10px 16px",textAlign:"center",border:"1px solid rgba(255,255,255,0.1)",flexShrink:0,cursor:"pointer"}}>
+          <div style={{fontSize:16,marginBottom:2}}>🔒</div>
+          <div style={{fontSize:8,color:"rgba(255,255,255,0.3)",textTransform:"uppercase",fontWeight:700,letterSpacing:"0.08em"}}>Score</div>
+          <div style={{fontSize:10,color:"#6ee7b7",fontWeight:700,marginTop:2}}>Pro</div>
         </div>
+      )}
       </div>
 
-      {/* Three pillars: Margin / Risk / Velocity */}
+      {/* Three pillars: Margin / Risk / Velocity — Pro only */}
+      {isPro ? (
       <div style={{display:"flex",flexDirection:"column",gap:7,marginBottom:18}}>
         {[
           {key:"Margin",   d:margin,   dominant:false, w:"35%"},
@@ -2662,10 +2693,26 @@ function UniversalVerdictHeader({verdict, vIcon, vColor, score, confidence, prim
           </div>
         ))}
       </div>
+      ) : (
+      <div onClick={()=>onActivatePro&&onActivatePro()} style={{background:"rgba(255,255,255,0.04)",borderRadius:10,padding:"12px 14px",marginBottom:18,cursor:"pointer",border:"1px solid rgba(255,255,255,0.08)"}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
+          <span style={{fontSize:10,fontWeight:700,color:"rgba(255,255,255,0.45)",textTransform:"uppercase",letterSpacing:"0.07em"}}>Margin · Risk · Velocity</span>
+          <span style={{fontSize:9,fontWeight:700,color:"#6ee7b7",background:"rgba(16,185,129,0.15)",padding:"2px 8px",borderRadius:100}}>🔒 Pro</span>
+        </div>
+        <div style={{display:"flex",gap:6}}>
+          {["Margin","Risk","Velocity"].map(k=>(
+            <div key={k} style={{flex:1,height:5,background:"rgba(255,255,255,0.07)",borderRadius:3}}>
+              <div style={{height:"100%",width:"??%",background:"rgba(255,255,255,0.15)",borderRadius:3}}/>
+            </div>
+          ))}
+        </div>
+        <div style={{fontSize:9,color:"rgba(255,255,255,0.25)",marginTop:6,textAlign:"center"}}>Upgrade to see pillar breakdown → $20/mo</div>
+      </div>
+      )}
 
       {/* 4 KPIs max (spec: "Maximum four key metrics above the fold") */}
       {kpis&&kpis.length>0&&(
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:8}}>
+    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:8}}>
           {kpis.slice(0,4).map(({l,v,col})=>(
             <div key={l} style={{background:"rgba(255,255,255,0.04)",borderRadius:8,padding:"10px 8px",textAlign:"center",border:"1px solid rgba(255,255,255,0.06)"}}>
               <div style={{fontSize:8,color:"rgba(255,255,255,0.25)",textTransform:"uppercase",fontWeight:700,letterSpacing:"0.06em",marginBottom:4}}>{l}</div>
@@ -2805,7 +2852,9 @@ function WholesaleCalc({saved,onCalcChange,isPro:isProProp,onActivatePro}) {
         {l:"Spread",      v:fmtD(c.spread),        col:c.spread>0?"#34d399":"#f87171"},
         {l:"ARV Cushion", v:fmtP(arvCushion),      col:arvCushion>=0.15?"#34d399":arvCushion>=0.10?"#fbbf24":"#f87171"},
       ]}
-    />
+    
+      isPro={isPro}
+      onActivatePro={onActivatePro}/>
 
     {/* ARV Sensitivity + Strategy selectors (compact) */}
     <div style={{display:"grid",gridTemplateColumns:"auto 1fr",gap:10,marginBottom:14,alignItems:"start"}}>
@@ -2869,7 +2918,26 @@ function WholesaleCalc({saved,onCalcChange,isPro:isProProp,onActivatePro}) {
     </div>
 
     {/* SECTION 2 — STABILITY (spread protection / stress) */}
-    <SectionCard title="Stability" subtitle="Spread protection under stress — fragility only" badge={wsRisk.verdict} badgeColor={wsRisk.vColor}>
+          {/* ── Stability Teaser (Free) ── */}
+      {!isPro&&(
+        <div style={{background:"white",borderRadius:16,border:"1.5px solid #e5e7eb",boxShadow:"0 1px 4px rgba(0,0,0,0.04)",marginBottom:12,overflow:"hidden"}}>
+          <div style={{padding:"12px 18px",borderBottom:"1px solid #f3f4f6",display:"flex",alignItems:"center",justifyContent:"space-between",background:"#fafafa"}}>
+            <div>
+              <div style={{fontSize:11,fontWeight:800,color:"#111827",textTransform:"uppercase",letterSpacing:"0.07em"}}>Stability Analysis</div>
+              <div style={{fontSize:10,color:"#9ca3af",marginTop:1}}>Stress tests · DSCR · Fragility breakdown</div>
+            </div>
+            <span style={{fontSize:9,fontWeight:700,color:"#f59e0b",background:"#fffbeb",border:"1px solid #fde68a",padding:"3px 10px",borderRadius:100,textTransform:"uppercase",letterSpacing:"0.07em"}}>🔒 Pro</span>
+          </div>
+          <div style={{padding:"16px 18px",textAlign:"center"}}>
+            <div style={{fontSize:28,marginBottom:8}}>🛡️</div>
+            <div style={{fontSize:13,fontWeight:700,color:"#111827",marginBottom:6}}>Can this deal survive a vacancy spike or rate increase?</div>
+            <div style={{fontSize:12,color:"#6b7280",marginBottom:14,maxWidth:360,margin:"0 auto 14px"}}>Unlock DSCR breakdown, stress test scenarios, break-even occupancy, and fragility scoring.</div>
+            <button onClick={()=>onActivatePro&&onActivatePro()} style={{padding:"9px 20px",borderRadius:8,border:"none",background:"linear-gradient(135deg,#064e3b,#065f46)",color:"white",fontSize:12,fontWeight:700,cursor:"pointer"}}>Upgrade to Pro — $20/mo →</button>
+          </div>
+        </div>
+      )}
+      {isPro&&(
+<SectionCard title="Stability" subtitle="Spread protection under stress — fragility only" badge={wsRisk.verdict} badgeColor={wsRisk.vColor}>
       {/* Pillar bars */}
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:14}}>
         {[["Spread",wsRisk.spreadScore,"#2563eb"],["Margin",wsRisk.marginScore,"#059669"],["Repair Risk",wsRisk.repairScore,"#d97706"],["Fee Safety",wsRisk.feeScore,"#7c3aed"]].map(([l,sc,col])=>(
@@ -2897,7 +2965,8 @@ function WholesaleCalc({saved,onCalcChange,isPro:isProProp,onActivatePro}) {
           </div>
         ))}
       </div>
-    </SectionCard>
+    </SectionCard>      )}
+
 
     <ProGate isPro={isPro} trigger="unlock" onActivatePro={onActivatePro}>
     {/* SECTION 3 — CAPITAL EFFICIENCY */}
@@ -3138,7 +3207,9 @@ function FlipCalc({saved,onCalcChange,isPro:isProProp,onActivatePro}) {
         {l:"Capital In",   v:fmtD(c.capitalIn),       col:"rgba(255,255,255,0.55)"},
         {l:"Annual ROI",   v:fmtP(c.annualROI),       col:c.annualROI>=0.30?"#34d399":"rgba(255,255,255,0.55)"},
       ]}
-    />
+    
+      isPro={isPro}
+      onActivatePro={onActivatePro}/>
 
     {/* ARV + Strategy selectors */}
     <div style={{display:"grid",gridTemplateColumns:"auto 1fr",gap:10,marginBottom:14,alignItems:"start"}}>
@@ -3192,7 +3263,26 @@ function FlipCalc({saved,onCalcChange,isPro:isProProp,onActivatePro}) {
     </InputSection>
 
     {/* SECTION 2 — STABILITY */}
-    <SectionCard title="Stability" subtitle="Profit survival under stress — fragility only" badge={flipRisk.verdict} badgeColor={flipRisk.vColor}>
+          {/* ── Stability Teaser (Free) ── */}
+      {!isPro&&(
+        <div style={{background:"white",borderRadius:16,border:"1.5px solid #e5e7eb",boxShadow:"0 1px 4px rgba(0,0,0,0.04)",marginBottom:12,overflow:"hidden"}}>
+          <div style={{padding:"12px 18px",borderBottom:"1px solid #f3f4f6",display:"flex",alignItems:"center",justifyContent:"space-between",background:"#fafafa"}}>
+            <div>
+              <div style={{fontSize:11,fontWeight:800,color:"#111827",textTransform:"uppercase",letterSpacing:"0.07em"}}>Stability Analysis</div>
+              <div style={{fontSize:10,color:"#9ca3af",marginTop:1}}>Stress tests · DSCR · Fragility breakdown</div>
+            </div>
+            <span style={{fontSize:9,fontWeight:700,color:"#f59e0b",background:"#fffbeb",border:"1px solid #fde68a",padding:"3px 10px",borderRadius:100,textTransform:"uppercase",letterSpacing:"0.07em"}}>🔒 Pro</span>
+          </div>
+          <div style={{padding:"16px 18px",textAlign:"center"}}>
+            <div style={{fontSize:28,marginBottom:8}}>🛡️</div>
+            <div style={{fontSize:13,fontWeight:700,color:"#111827",marginBottom:6}}>Can this deal survive a vacancy spike or rate increase?</div>
+            <div style={{fontSize:12,color:"#6b7280",marginBottom:14,maxWidth:360,margin:"0 auto 14px"}}>Unlock DSCR breakdown, stress test scenarios, break-even occupancy, and fragility scoring.</div>
+            <button onClick={()=>onActivatePro&&onActivatePro()} style={{padding:"9px 20px",borderRadius:8,border:"none",background:"linear-gradient(135deg,#064e3b,#065f46)",color:"white",fontSize:12,fontWeight:700,cursor:"pointer"}}>Upgrade to Pro — $20/mo →</button>
+          </div>
+        </div>
+      )}
+      {isPro&&(
+<SectionCard title="Stability" subtitle="Profit survival under stress — fragility only" badge={flipRisk.verdict} badgeColor={flipRisk.vColor}>
       <MetricGrid items={[
         {l:"Profit",     v:fmtD(c.profit),           good:c.profit>0, warn:c.profit>-5000, accent:true},
         {l:"Profit %",   v:fmtP(c.profitPct),         good:c.profitPct>=0.15, warn:c.profitPct>=0.10, accent:true},
@@ -3211,7 +3301,8 @@ function FlipCalc({saved,onCalcChange,isPro:isProProp,onActivatePro}) {
           </div>
         ))}
       </div>
-    </SectionCard>
+    </SectionCard>      )}
+
 
     <ProGate isPro={isPro} trigger="unlock" onActivatePro={onActivatePro}>
     {/* SECTION 3 — CAPITAL EFFICIENCY */}
@@ -3435,7 +3526,9 @@ function BRRRRCalc({saved,onCalcChange,isPro:isProProp,onActivatePro}) {
         {l:"Post-Refi CF",      v:fmtD(c.mcf)+"/mo",              col:c.mcf>=200?"#34d399":c.mcf>=0?"#fbbf24":"#f87171"},
         {l:"DSCR",              v:c.dscr.toFixed(2)+"x",           col:c.dscr>=1.25?"#34d399":c.dscr>=1.1?"#fbbf24":"#f87171"},
       ]}
-    />
+    
+      isPro={isPro}
+      onActivatePro={onActivatePro}/>
 
     {/* ARV Sensitivity */}
     <div style={{background:"white",borderRadius:12,padding:"10px 14px",border:"1.5px solid #e5e7eb",marginBottom:14}}>
@@ -3474,7 +3567,26 @@ function BRRRRCalc({saved,onCalcChange,isPro:isProProp,onActivatePro}) {
     </InputSection>
 
     {/* SECTION 2 — STABILITY */}
-    <SectionCard title="Stability" subtitle="Refinance fragility + DSCR + ARV sensitivity" badge={brrrRisk.verdict} badgeColor={brrrRisk.vColor}>
+          {/* ── Stability Teaser (Free) ── */}
+      {!isPro&&(
+        <div style={{background:"white",borderRadius:16,border:"1.5px solid #e5e7eb",boxShadow:"0 1px 4px rgba(0,0,0,0.04)",marginBottom:12,overflow:"hidden"}}>
+          <div style={{padding:"12px 18px",borderBottom:"1px solid #f3f4f6",display:"flex",alignItems:"center",justifyContent:"space-between",background:"#fafafa"}}>
+            <div>
+              <div style={{fontSize:11,fontWeight:800,color:"#111827",textTransform:"uppercase",letterSpacing:"0.07em"}}>Stability Analysis</div>
+              <div style={{fontSize:10,color:"#9ca3af",marginTop:1}}>Stress tests · DSCR · Fragility breakdown</div>
+            </div>
+            <span style={{fontSize:9,fontWeight:700,color:"#f59e0b",background:"#fffbeb",border:"1px solid #fde68a",padding:"3px 10px",borderRadius:100,textTransform:"uppercase",letterSpacing:"0.07em"}}>🔒 Pro</span>
+          </div>
+          <div style={{padding:"16px 18px",textAlign:"center"}}>
+            <div style={{fontSize:28,marginBottom:8}}>🛡️</div>
+            <div style={{fontSize:13,fontWeight:700,color:"#111827",marginBottom:6}}>Can this deal survive a vacancy spike or rate increase?</div>
+            <div style={{fontSize:12,color:"#6b7280",marginBottom:14,maxWidth:360,margin:"0 auto 14px"}}>Unlock DSCR breakdown, stress test scenarios, break-even occupancy, and fragility scoring.</div>
+            <button onClick={()=>onActivatePro&&onActivatePro()} style={{padding:"9px 20px",borderRadius:8,border:"none",background:"linear-gradient(135deg,#064e3b,#065f46)",color:"white",fontSize:12,fontWeight:700,cursor:"pointer"}}>Upgrade to Pro — $20/mo →</button>
+          </div>
+        </div>
+      )}
+      {isPro&&(
+<SectionCard title="Stability" subtitle="Refinance fragility + DSCR + ARV sensitivity" badge={brrrRisk.verdict} badgeColor={brrrRisk.vColor}>
       <MetricGrid items={[
         {l:"Refi Loan",        v:fmtD(c.refiLoan),         col:"#374151"},
         {l:"Cash Left In",     v:fmtD(c.cashLeft),          good:c.cashLeft<=0, warn:c.cashLeft<c.allIn*0.25, accent:true},
@@ -3492,7 +3604,8 @@ function BRRRRCalc({saved,onCalcChange,isPro:isProProp,onActivatePro}) {
         </div>
         <div style={{fontSize:10,color:"#6b7280"}}>{fmtP(c.pctRecovered)} of all-in capital recovered via refi</div>
       </div>
-    </SectionCard>
+    </SectionCard>      )}
+
 
     <ProGate isPro={isPro} trigger="unlock" onActivatePro={onActivatePro}>
     {/* SECTION 3 — CAPITAL EFFICIENCY */}
@@ -3763,7 +3876,9 @@ function SubToCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro}) {
         {l:"DSCR",        v:c.dscr.toFixed(2)+"x",             col:c.dscr>=1.25?"#34d399":c.dscr>=1.1?"#fbbf24":"#f87171"},
         {l:"Cap. Effic.", v:subtoRisk.capEfficiency.toFixed(1)+"×", col:subtoRisk.capEfficiency>=3?"#34d399":"rgba(255,255,255,0.55)"},
       ]}
-    />
+    
+      isPro={isPro}
+      onActivatePro={onActivatePro}/>
 
     {/* Seller structure toggles */}
     <div style={{background:"white",borderRadius:12,padding:"12px 16px",border:"1.5px solid #e5e7eb",marginBottom:14}}>
@@ -3806,7 +3921,26 @@ function SubToCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro}) {
     </InputSection>
 
     {/* SECTION 2 — STABILITY (DSCR / DOS / thin cash flow fragility) */}
-    <SectionCard title="Stability" subtitle="DSCR fragility · Due-on-sale risk · Cash flow durability" badge={subtoRisk.verdict} badgeColor={subtoRisk.vColor}>
+          {/* ── Stability Teaser (Free) ── */}
+      {!isPro&&(
+        <div style={{background:"white",borderRadius:16,border:"1.5px solid #e5e7eb",boxShadow:"0 1px 4px rgba(0,0,0,0.04)",marginBottom:12,overflow:"hidden"}}>
+          <div style={{padding:"12px 18px",borderBottom:"1px solid #f3f4f6",display:"flex",alignItems:"center",justifyContent:"space-between",background:"#fafafa"}}>
+            <div>
+              <div style={{fontSize:11,fontWeight:800,color:"#111827",textTransform:"uppercase",letterSpacing:"0.07em"}}>Stability Analysis</div>
+              <div style={{fontSize:10,color:"#9ca3af",marginTop:1}}>Stress tests · DSCR · Fragility breakdown</div>
+            </div>
+            <span style={{fontSize:9,fontWeight:700,color:"#f59e0b",background:"#fffbeb",border:"1px solid #fde68a",padding:"3px 10px",borderRadius:100,textTransform:"uppercase",letterSpacing:"0.07em"}}>🔒 Pro</span>
+          </div>
+          <div style={{padding:"16px 18px",textAlign:"center"}}>
+            <div style={{fontSize:28,marginBottom:8}}>🛡️</div>
+            <div style={{fontSize:13,fontWeight:700,color:"#111827",marginBottom:6}}>Can this deal survive a vacancy spike or rate increase?</div>
+            <div style={{fontSize:12,color:"#6b7280",marginBottom:14,maxWidth:360,margin:"0 auto 14px"}}>Unlock DSCR breakdown, stress test scenarios, break-even occupancy, and fragility scoring.</div>
+            <button onClick={()=>onActivatePro&&onActivatePro()} style={{padding:"9px 20px",borderRadius:8,border:"none",background:"linear-gradient(135deg,#064e3b,#065f46)",color:"white",fontSize:12,fontWeight:700,cursor:"pointer"}}>Upgrade to Pro — $20/mo →</button>
+          </div>
+        </div>
+      )}
+      {isPro&&(
+<SectionCard title="Stability" subtitle="DSCR fragility · Due-on-sale risk · Cash flow durability" badge={subtoRisk.verdict} badgeColor={subtoRisk.vColor}>
       <MetricGrid items={[
         {l:"DSCR",         v:c.dscr.toFixed(2)+"x",       good:c.dscr>=1.25, warn:c.dscr>=1.1, accent:true},
         {l:"Break-even",   v:(c.beo*100).toFixed(1)+"%",   good:c.beo<=0.80,  warn:c.beo<=0.90, accent:true},
@@ -3826,7 +3960,8 @@ function SubToCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro}) {
           </div>
         ))}
       </div>
-    </SectionCard>
+    </SectionCard>      )}
+
 
     <ProGate isPro={isPro} trigger="unlock" onActivatePro={onActivatePro}>
     {/* SECTION 3 — CAPITAL EFFICIENCY (rate arbitrage + equity capture) */}
@@ -4053,7 +4188,9 @@ function NovationCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro}
         {l:"ARV Cushion",  v:fmtP(c.arvCushion),     col:c.arvCushion>=0.10?"#34d399":c.arvCushion>=0.05?"#fbbf24":"#f87171"},
         {l:"Timeline",     v:i.duration+"mo",         col:+i.duration<=4?"#34d399":+i.duration<=6?"#fbbf24":"#f87171"},
       ]}
-    />
+    
+      isPro={isPro}
+      onActivatePro={onActivatePro}/>
 
     {/* ARV + Buyer financing selectors */}
     <div style={{display:"grid",gridTemplateColumns:"auto 1fr",gap:10,marginBottom:14,alignItems:"start"}}>
@@ -4096,7 +4233,26 @@ function NovationCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro}
     </InputSection>
 
     {/* SECTION 2 — STABILITY (retail friction + ARV + timeline exposure) */}
-    <SectionCard title="Stability" subtitle="Retail friction · ARV compression · Timeline exposure" badge={novRisk.verdict} badgeColor={novRisk.vColor}>
+          {/* ── Stability Teaser (Free) ── */}
+      {!isPro&&(
+        <div style={{background:"white",borderRadius:16,border:"1.5px solid #e5e7eb",boxShadow:"0 1px 4px rgba(0,0,0,0.04)",marginBottom:12,overflow:"hidden"}}>
+          <div style={{padding:"12px 18px",borderBottom:"1px solid #f3f4f6",display:"flex",alignItems:"center",justifyContent:"space-between",background:"#fafafa"}}>
+            <div>
+              <div style={{fontSize:11,fontWeight:800,color:"#111827",textTransform:"uppercase",letterSpacing:"0.07em"}}>Stability Analysis</div>
+              <div style={{fontSize:10,color:"#9ca3af",marginTop:1}}>Stress tests · DSCR · Fragility breakdown</div>
+            </div>
+            <span style={{fontSize:9,fontWeight:700,color:"#f59e0b",background:"#fffbeb",border:"1px solid #fde68a",padding:"3px 10px",borderRadius:100,textTransform:"uppercase",letterSpacing:"0.07em"}}>🔒 Pro</span>
+          </div>
+          <div style={{padding:"16px 18px",textAlign:"center"}}>
+            <div style={{fontSize:28,marginBottom:8}}>🛡️</div>
+            <div style={{fontSize:13,fontWeight:700,color:"#111827",marginBottom:6}}>Can this deal survive a vacancy spike or rate increase?</div>
+            <div style={{fontSize:12,color:"#6b7280",marginBottom:14,maxWidth:360,margin:"0 auto 14px"}}>Unlock DSCR breakdown, stress test scenarios, break-even occupancy, and fragility scoring.</div>
+            <button onClick={()=>onActivatePro&&onActivatePro()} style={{padding:"9px 20px",borderRadius:8,border:"none",background:"linear-gradient(135deg,#064e3b,#065f46)",color:"white",fontSize:12,fontWeight:700,cursor:"pointer"}}>Upgrade to Pro — $20/mo →</button>
+          </div>
+        </div>
+      )}
+      {isPro&&(
+<SectionCard title="Stability" subtitle="Retail friction · ARV compression · Timeline exposure" badge={novRisk.verdict} badgeColor={novRisk.vColor}>
       <MetricGrid items={[
         {l:"Profit",       v:fmtD(c.profit),           good:c.profit>0, warn:c.profit>-5000, accent:true},
         {l:"ARV Cushion",  v:fmtP(c.arvCushion),        good:c.arvCushion>=0.10, warn:c.arvCushion>=0.05, accent:true},
@@ -4115,7 +4271,8 @@ function NovationCalc({saved,onCalcChange,profile,isPro:isProProp,onActivatePro}
           </div>
         ))}
       </div>
-    </SectionCard>
+    </SectionCard>      )}
+
 
     <ProGate isPro={isPro} trigger="unlock" onActivatePro={onActivatePro}>
     {/* SECTION 3 — CAPITAL EFFICIENCY */}
@@ -4324,7 +4481,7 @@ function ReactionBar({post, onReact, userReaction, onReactWithReason}) {
   );
 }
 
-function ForumView({user, profile, savedDeals=[], isPro=false}) {
+function ForumView({user, profile, savedDeals=[], isPro=false, onActivatePro}) {
   const [posts, setPosts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showNew, setShowNew] = useState(false);
@@ -5612,7 +5769,7 @@ function PortfolioAnalyzer({profile,onSave}) {
   );
 }
 // ─── Profile Page ──────────────────────────────────────────────────────────────
-function ProfilePage({user,profile,onUpdate,onSignOut,onBack}) {
+function ProfilePage({user,profile,isPro=false,onActivatePro,onUpdate,onSignOut,onBack}) {
   const [tab,setTab]=useState("profile");
   const [form,setForm]=useState({full_name:"",phone:"",location:"",investor_type:"",bio:"",title:"",portfolio_value:0,portfolio_public:false,mentoring_enabled:false,hourly_rate:"",calendly_link:"",mentoring_bio:"",...profile});
   const [loading,setLoading]=useState(false);const [saved,setSaved]=useState(false);const [err,setErr]=useState("");
@@ -5670,7 +5827,7 @@ function ProfilePage({user,profile,onUpdate,onSignOut,onBack}) {
             <div style={{fontSize:42,marginBottom:6}}>{medal.icon}</div>
             <div style={{fontSize:13,fontWeight:800,color:"white"}}>{medal.label}</div>
             <div style={{fontSize:10,color:"rgba(255,255,255,0.5)",marginTop:2}}>{medal.desc}</div>
-            {form.portfolio_public?<div style={{fontSize:12,fontWeight:700,color:"#6ee7b7",marginTop:8}}>{fmtM(+(form.portfolio_value)||0)}</div>:<div style={{fontSize:11,color:"rgba(255,255,255,0.35)",marginTop:8}}>🔒 Private</div>}
+            {form.isPro&&form.portfolio_public?<div style={{fontSize:12,fontWeight:700,color:"#6ee7b7",marginTop:8}}>{fmtM(+(form.portfolio_value)||0)}</div>:isPro?<div style={{fontSize:11,color:"rgba(255,255,255,0.35)",marginTop:8}}>🔒 Private</div>:<div style={{fontSize:11,color:"rgba(255,255,255,0.35)",marginTop:8}}>Pro feature</div>}
           </div>
         </div>
 
@@ -5727,7 +5884,24 @@ function ProfilePage({user,profile,onUpdate,onSignOut,onBack}) {
         )}
 
         {/* Portfolio tab */}
-        {tab==="portfolio"&&<PortfolioAnalyzer profile={{...form,portfolio_properties:form.portfolio_properties||[]}} onSave={handlePortfolioSave}/>}
+        {tab==="portfolio"&&(
+          isPro
+            ? <PortfolioAnalyzer profile={{...form,portfolio_properties:form.portfolio_properties||[]}} onSave={handlePortfolioSave}/>
+            : <div style={{background:"white",borderRadius:16,border:"1.5px solid #e5e7eb",padding:"48px 24px",textAlign:"center"}}>
+                <div style={{fontSize:40,marginBottom:16}}>📊</div>
+                <div style={{fontSize:16,fontWeight:700,color:"#111827",marginBottom:8,fontFamily:"'Fraunces',serif"}}>Portfolio Analyzer</div>
+                <div style={{fontSize:13,color:"#6b7280",maxWidth:400,margin:"0 auto 24px",lineHeight:1.6}}>Track all your properties, analyze your overall portfolio health, DSCR, cash flow, and net worth — all in one place.</div>
+                <div style={{display:"flex",flexDirection:"column",gap:8,maxWidth:280,margin:"0 auto 24px"}}>
+                  {[["📈","Portfolio-level DSCR & cash flow"],["🏠","Track every property you own"],["⚡","Net worth & equity tracking"],["🧠","Portfolio stress testing"]].map(([icon,label])=>(
+                    <div key={label} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",background:"#f0fdf4",borderRadius:8,textAlign:"left"}}>
+                      <span>{icon}</span>
+                      <span style={{fontSize:12,color:"#059669",fontWeight:600}}>{label}</span>
+                    </div>
+                  ))}
+                </div>
+                <button onClick={()=>onActivatePro&&onActivatePro()} style={{padding:"12px 28px",borderRadius:10,border:"none",background:"linear-gradient(135deg,#064e3b,#065f46)",color:"white",fontSize:13,fontWeight:700,cursor:"pointer"}}>Upgrade to Pro — $20/mo →</button>
+              </div>
+        )}
 
         {/* Mentoring tab */}
         {tab==="mentoring"&&(
@@ -6404,6 +6578,405 @@ const DEMO={
 };
 
 // ─── Landing Page ──────────────────────────────────────────────────────────────
+
+// ─── Verified Professionals Directory ─────────────────────────────────────────
+
+const PROF_TYPES = [
+  { id: "lender",     label: "Lenders",     icon: "🏦", color: "#1d4ed8", bg: "#eff6ff", border: "#bfdbfe",
+    badge: "Platform Verified Lender",
+    description: "Hard money, private money, DSLC, and conventional lenders vetted by DealSource.",
+    fields: ["loan_types","min_loan","max_loan","ltv","points","rate_range","close_time","states"] },
+  { id: "contractor", label: "Contractors", icon: "🔨", color: "#b45309", bg: "#fffbeb", border: "#fde68a",
+    badge: "Platform Verified Contractor",
+    description: "General contractors and trade specialists vetted for rehab and fix & flip projects.",
+    fields: ["specialties","min_project","max_project","license","insured","warranty","states"] },
+  { id: "realtor",    label: "Realtors",    icon: "🏠", color: "#059669", bg: "#f0fdf4", border: "#6ee7b7",
+    badge: "Platform Verified Realtor",
+    description: "Investor-friendly agents who understand ARV, creative finance, and off-market deals.",
+    fields: ["investor_focus","avg_deals_yr","designations","markets","states"] },
+];
+
+const SAMPLE_PROS = [
+  // Lenders
+  { id:"l1", type:"lender", name:"Marcus Lending Group", contact:"marcus@mlgfunding.com", phone:"(404) 555-0182",
+    states:["GA","NC","SC","TN","FL"], city:"Atlanta, GA",
+    loan_types:"Hard Money, DSCR, Fix & Flip", min_loan:"$50K", max_loan:"$2M",
+    ltv:"75% ARV", points:"2–3", rate_range:"10–13%", close_time:"7–10 days",
+    bio:"15 years funding investor deals across the Southeast. No tax returns for DSCR loans. Same-week term sheets.",
+    verified:true, reviews:34, rating:4.9, joined:"2024-01" },
+  { id:"l2", type:"lender", name:"Keystone Capital Partners", contact:"deals@keystonecap.io", phone:"(215) 555-0341",
+    states:["PA","NJ","NY","DE","MD","CT"],  city:"Philadelphia, PA",
+    loan_types:"Bridge, Hard Money, New Construction", min_loan:"$100K", max_loan:"$5M",
+    ltv:"70% ARV", points:"1.5–2.5", rate_range:"9.5–12%", close_time:"5–7 days",
+    bio:"Specializing in mid-Atlantic markets. Fund our own deals — no brokering. Quick closes guaranteed.",
+    verified:true, reviews:51, rating:4.8, joined:"2023-06" },
+  { id:"l3", type:"lender", name:"Sunbelt Private Lending", contact:"info@sunbeltpl.com", phone:"(602) 555-0217",
+    states:["AZ","NV","TX","CO","NM"], city:"Phoenix, AZ",
+    loan_types:"Hard Money, BRRRR, Subject-To Refi", min_loan:"$75K", max_loan:"$3M",
+    ltv:"80% ARV on refi", points:"2", rate_range:"10–12%", close_time:"10 days",
+    bio:"BRRRR and DSCR specialists. We understand creative finance and close fast in the Southwest.",
+    verified:true, reviews:28, rating:4.7, joined:"2024-03" },
+  // Contractors
+  { id:"c1", type:"contractor", name:"Premier Rehab Solutions", contact:"bids@premierrehab.com", phone:"(214) 555-0093",
+    states:["TX","OK","AR","LA"], city:"Dallas, TX",
+    specialties:"Full Gut, Kitchen & Bath, Roofing, Foundation", min_project:"$15K", max_project:"$500K",
+    license:"TX #GC-88124", insured:"$2M General Liability", warranty:"1-year workmanship",
+    bio:"250+ investor flips completed. Scope-of-work bids within 48 hours. We build your profit margin in.",
+    verified:true, reviews:62, rating:4.8, joined:"2023-09" },
+  { id:"c2", type:"contractor", name:"Iron Ridge Construction", contact:"hello@ironridgegc.com", phone:"(312) 555-0477",
+    states:["IL","IN","WI","MO"], city:"Chicago, IL",
+    specialties:"Multi-family, Commercial Conversion, Historic Rehab", min_project:"$50K", max_project:"$2M",
+    license:"IL GC #0012834", insured:"$5M GL + Workers Comp", warranty:"2-year structural",
+    bio:"Multi-family rehab experts. 180+ units rehabbed. Trusted by 40+ active investors in the Midwest.",
+    verified:true, reviews:44, rating:4.9, joined:"2023-11" },
+  { id:"c3", type:"contractor", name:"Coastal Flip Crew", contact:"crew@coastalflip.com", phone:"(843) 555-0329",
+    states:["SC","NC","GA","VA","FL"], city:"Charleston, SC",
+    specialties:"Cosmetic, Kitchen, Bath, Landscaping, Staging", min_project:"$10K", max_project:"$200K",
+    license:"SC #RBC 119834", insured:"$1M GL", warranty:"6-month cosmetic",
+    bio:"Fast cosmetic specialists for BRRRR and flip investors. Average 3-week turnaround on cosmetic rehabs.",
+    verified:true, reviews:39, rating:4.7, joined:"2024-02" },
+  // Realtors
+  { id:"r1", type:"realtor", name:"Priya Mehta, CCIM", contact:"priya@priyamehta.realty", phone:"(404) 555-0561",
+    states:["GA","TN","NC"], city:"Atlanta, GA",
+    investor_focus:"BRRRR, Wholesale, Multi-Family", avg_deals_yr:"60+ investor transactions",
+    designations:"CCIM, SFR, Investor Specialist",
+    markets:"Atlanta MSA, Chattanooga, Charlotte",
+    bio:"Full-time investor agent. I run ARV comps the right way — 90-day sold, tight radius, condition-adjusted. No fluff.",
+    verified:true, reviews:87, rating:5.0, joined:"2023-03" },
+  { id:"r2", type:"realtor", name:"Derek Osei", contact:"derek@offerfast.realtor", phone:"(702) 555-0814",
+    states:["NV","AZ","UT"], city:"Las Vegas, NV",
+    investor_focus:"Fix & Flip, New Construction, Land", avg_deals_yr:"45+ transactions",
+    designations:"SFR, ABR, Military Relocation",
+    markets:"Las Vegas, Henderson, Phoenix Metro, St. George",
+    bio:"Off-market deal flow specialist. I bring my investors deals before they hit the MLS. 8 years investor-side.",
+    verified:true, reviews:53, rating:4.9, joined:"2023-07" },
+  { id:"r3", type:"realtor", name:"Carmen Fuentes", contact:"carmen@fronteraprops.com", phone:"(210) 555-0632",
+    states:["TX","NM"], city:"San Antonio, TX",
+    investor_focus:"Subject-To, Creative Finance, Multi-Family",
+    avg_deals_yr:"35+ transactions",
+    designations:"REALTOR®, Certified Negotiation Expert",
+    markets:"San Antonio, Austin, El Paso, Albuquerque",
+    bio:"Creative finance specialist. I find sellers open to subject-to and seller finance before they list. Bilingual.",
+    verified:true, reviews:41, rating:4.8, joined:"2024-01" },
+];
+
+const US_STATES_LIST = ["AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA", "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ", "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY"];
+
+function StarRating2({rating, count}) {
+  return (
+    <div style={{display:"flex",alignItems:"center",gap:5}}>
+      <div style={{display:"flex",gap:1}}>
+        {[1,2,3,4,5].map(s=>(
+          <span key={s} style={{fontSize:10,color:s<=Math.round(rating)?"#f59e0b":"#e5e7eb"}}>★</span>
+        ))}
+      </div>
+      <span style={{fontSize:11,fontWeight:700,color:"#111827"}}>{rating.toFixed(1)}</span>
+      <span style={{fontSize:10,color:"#9ca3af"}}>({count} reviews)</span>
+    </div>
+  );
+}
+
+function ProCard({pro, onContact}) {
+  const ptype = PROF_TYPES.find(p=>p.id===pro.type);
+  const [expanded, setExpanded] = useState(false);
+  const [contacted, setContacted] = useState(false);
+
+  if(!ptype) return null;
+  return (
+    <div style={{background:"white",borderRadius:16,border:`1.5px solid ${expanded?ptype.border:"#e5e7eb"}`,boxShadow:expanded?"0 4px 24px rgba(0,0,0,0.08)":"0 1px 4px rgba(0,0,0,0.04)",transition:"all 0.2s",overflow:"hidden"}}>
+      {/* Header */}
+      <div style={{padding:"18px 20px",cursor:"pointer"}} onClick={()=>setExpanded(e=>!e)}>
+        <div style={{display:"flex",alignItems:"flex-start",gap:14}}>
+          <div style={{width:46,height:46,borderRadius:12,background:ptype.bg,border:`1.5px solid ${ptype.border}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,flexShrink:0}}>
+            {ptype.icon}
+          </div>
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:3}}>
+              <span style={{fontSize:14,fontWeight:800,color:"#111827"}}>{pro.name}</span>
+              {pro.verified&&<span style={{fontSize:9,fontWeight:700,color:ptype.color,background:ptype.bg,border:`1px solid ${ptype.border}`,padding:"2px 8px",borderRadius:100,whiteSpace:"nowrap"}}>✓ {ptype.badge}</span>}
+            </div>
+            <div style={{fontSize:11,color:"#6b7280",marginBottom:4}}>📍 {pro.city}</div>
+            <StarRating2 rating={pro.rating} count={pro.reviews}/>
+          </div>
+          <div style={{fontSize:16,color:"#9ca3af",flexShrink:0,marginTop:2}}>{expanded?"▲":"▼"}</div>
+        </div>
+        {/* State pills */}
+        <div style={{display:"flex",gap:4,flexWrap:"wrap",marginTop:10}}>
+          {pro.states.slice(0,8).map(s=>(
+            <span key={s} style={{fontSize:9,fontWeight:700,color:ptype.color,background:ptype.bg,padding:"2px 7px",borderRadius:100,border:`1px solid ${ptype.border}`}}>{s}</span>
+          ))}
+          {pro.states.length>8&&<span style={{fontSize:9,color:"#9ca3af"}}>+{pro.states.length-8} more</span>}
+        </div>
+      </div>
+
+      {/* Expanded detail */}
+      {expanded&&(
+        <div style={{borderTop:"1px solid #f3f4f6",padding:"16px 20px"}}>
+          <p style={{fontSize:12,color:"#374151",lineHeight:1.7,marginBottom:14,fontStyle:"italic"}}>"{pro.bio}"</p>
+
+          {/* Type-specific details */}
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:14}}>
+            {pro.type==="lender"&&[
+              ["Loan Types", pro.loan_types],
+              ["Loan Range", `${pro.min_loan} – ${pro.max_loan}`],
+              ["Max LTV", pro.ltv],
+              ["Points", pro.points],
+              ["Rate Range", pro.rate_range],
+              ["Close Time", pro.close_time],
+            ].map(([l,v])=>(
+              <div key={l} style={{background:"#f8fafc",borderRadius:8,padding:"8px 10px"}}>
+                <div style={{fontSize:9,fontWeight:700,color:"#9ca3af",textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:2}}>{l}</div>
+                <div style={{fontSize:11,fontWeight:600,color:"#111827"}}>{v}</div>
+              </div>
+            ))}
+            {pro.type==="contractor"&&[
+              ["Specialties", pro.specialties],
+              ["Project Range", `${pro.min_project} – ${pro.max_project}`],
+              ["License", pro.license],
+              ["Insurance", pro.insured],
+              ["Warranty", pro.warranty],
+            ].map(([l,v])=>(
+              <div key={l} style={{background:"#f8fafc",borderRadius:8,padding:"8px 10px",gridColumn:["Specialties","License"].includes(l)?"span 2":""}}>
+                <div style={{fontSize:9,fontWeight:700,color:"#9ca3af",textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:2}}>{l}</div>
+                <div style={{fontSize:11,fontWeight:600,color:"#111827"}}>{v}</div>
+              </div>
+            ))}
+            {pro.type==="realtor"&&[
+              ["Investor Focus", pro.investor_focus],
+              ["Avg Deals/Year", pro.avg_deals_yr],
+              ["Designations", pro.designations],
+              ["Markets", pro.markets],
+            ].map(([l,v])=>(
+              <div key={l} style={{background:"#f8fafc",borderRadius:8,padding:"8px 10px",gridColumn:["Investor Focus","Markets"].includes(l)?"span 2":""}}>
+                <div style={{fontSize:9,fontWeight:700,color:"#9ca3af",textTransform:"uppercase",letterSpacing:"0.05em",marginBottom:2}}>{l}</div>
+                <div style={{fontSize:11,fontWeight:600,color:"#111827"}}>{v}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Contact */}
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+            {contacted ? (
+              <div style={{flex:1,padding:"10px 16px",background:"#f0fdf4",borderRadius:8,border:"1px solid #6ee7b7",fontSize:12,color:"#059669",fontWeight:600,textAlign:"center"}}>
+                ✓ Contact info sent to your email — check your inbox
+              </div>
+            ) : (
+              <>
+                <button onClick={()=>{setContacted(true);onContact&&onContact(pro);}}
+                  style={{flex:1,padding:"10px 16px",borderRadius:8,border:"none",background:`linear-gradient(135deg,${ptype.color},${ptype.color}cc)`,color:"white",fontSize:12,fontWeight:700,cursor:"pointer"}}>
+                  📧 Request Introduction
+                </button>
+                {pro.phone&&(
+                  <a href={`tel:${pro.phone}`}
+                    style={{padding:"10px 14px",borderRadius:8,border:`1.5px solid ${ptype.border}`,background:ptype.bg,color:ptype.color,fontSize:12,fontWeight:700,cursor:"pointer",textDecoration:"none",display:"flex",alignItems:"center",gap:6}}>
+                    📞 {pro.phone}
+                  </a>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function VerifiedProsView({user, profile}) {
+  const [activeType, setActiveType] = useState("lender");
+  const [stateFilter, setStateFilter] = useState("ALL");
+  const [search, setSearch] = useState("");
+  const [applyModal, setApplyModal] = useState(false);
+  const [applyType, setApplyType] = useState("lender");
+  const [applyForm, setApplyForm] = useState({name:"",email:"",phone:"",bio:"",states:[],website:""});
+  const [applySubmitted, setApplySubmitted] = useState(false);
+
+  const ptype = PROF_TYPES.find(p=>p.id===activeType);
+
+  const filtered = SAMPLE_PROS.filter(p=>{
+    if(p.type!==activeType) return false;
+    if(stateFilter!=="ALL" && !p.states.includes(stateFilter)) return false;
+    if(search && !p.name.toLowerCase().includes(search.toLowerCase()) &&
+       !p.bio.toLowerCase().includes(search.toLowerCase()) &&
+       !p.states.join(" ").toLowerCase().includes(search.toLowerCase())) return false;
+    return true;
+  });
+
+  const toggleState = (s) => setApplyForm(f=>({...f, states: f.states.includes(s)?f.states.filter(x=>x!==s):[...f.states,s]}));
+
+  return (
+    <div style={{minHeight:"100vh",background:"#f8fafc",fontFamily:"'DM Sans',sans-serif",paddingBottom:60}}>
+      {/* Header */}
+      <div style={{background:"linear-gradient(135deg,#0a0f1e,#0f172a)",padding:"32px 20px 28px"}}>
+        <div style={{maxWidth:900,margin:"0 auto"}}>
+          <div style={{fontSize:11,fontWeight:800,color:"#6ee7b7",letterSpacing:"0.12em",textTransform:"uppercase",marginBottom:8}}>DealSource Verified</div>
+          <h1 style={{fontFamily:"'Fraunces',serif",fontSize:"clamp(24px,4vw,36px)",fontWeight:900,color:"white",marginBottom:8,lineHeight:1.1}}>
+            Investor-Grade Professionals
+          </h1>
+          <p style={{fontSize:13,color:"rgba(255,255,255,0.55)",maxWidth:540,marginBottom:20,lineHeight:1.6}}>
+            Every lender, contractor, and realtor here has been vetted by the DealSource team. Filter by your state and connect directly.
+          </p>
+          {/* Type tabs */}
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+            {PROF_TYPES.map(pt=>(
+              <button key={pt.id} onClick={()=>{setActiveType(pt.id);setStateFilter("ALL");setSearch("");}}
+                style={{padding:"8px 18px",borderRadius:100,border:"none",
+                  background:activeType===pt.id?"white":"rgba(255,255,255,0.08)",
+                  color:activeType===pt.id?"#111827":"rgba(255,255,255,0.6)",
+                  fontSize:12,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",gap:6,transition:"all 0.15s"}}>
+                <span>{pt.icon}</span>{pt.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div style={{maxWidth:900,margin:"0 auto",padding:"24px 20px"}}>
+        {/* Type description banner */}
+        <div style={{background:ptype.bg,border:`1.5px solid ${ptype.border}`,borderRadius:12,padding:"12px 16px",marginBottom:20,display:"flex",alignItems:"center",gap:12}}>
+          <span style={{fontSize:22}}>{ptype.icon}</span>
+          <div>
+            <div style={{fontSize:12,fontWeight:700,color:ptype.color}}>{ptype.badge}s</div>
+            <div style={{fontSize:11,color:"#6b7280"}}>{ptype.description}</div>
+          </div>
+        </div>
+
+        {/* Filters */}
+        <div style={{display:"flex",gap:10,marginBottom:20,flexWrap:"wrap"}}>
+          <div style={{flex:1,minWidth:200,display:"flex",alignItems:"center",gap:8,padding:"9px 14px",background:"white",border:"1.5px solid #e5e7eb",borderRadius:10}}>
+            <span style={{fontSize:14}}>🔍</span>
+            <input type="text" value={search} onChange={e=>setSearch(e.target.value)}
+              placeholder={`Search ${ptype.label.toLowerCase()}...`}
+              style={{flex:1,border:"none",outline:"none",fontSize:13,color:"#111827",fontFamily:"'DM Sans',sans-serif",background:"transparent"}}/>
+            {search&&<button onClick={()=>setSearch("")} style={{background:"none",border:"none",color:"#9ca3af",cursor:"pointer",padding:0,fontSize:14}}>✕</button>}
+          </div>
+          <select value={stateFilter} onChange={e=>setStateFilter(e.target.value)}
+            style={{padding:"9px 14px",borderRadius:10,border:"1.5px solid #e5e7eb",background:"white",fontSize:13,color:"#374151",cursor:"pointer",fontFamily:"'DM Sans',sans-serif",minWidth:140}}>
+            <option value="ALL">All States</option>
+            {US_STATES_LIST.map(s=><option key={s} value={s}>{s}</option>)}
+          </select>
+        </div>
+
+        {/* Results count */}
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16}}>
+          <span style={{fontSize:12,color:"#6b7280",fontWeight:600}}>
+            {filtered.length} {ptype.label.toLowerCase()}{filtered.length!==1?"s":""} {stateFilter!=="ALL"?`in ${stateFilter}`:"nationwide"}
+          </span>
+          <button onClick={()=>{setApplyType(activeType);setApplyModal(true);}}
+            style={{padding:"7px 14px",borderRadius:8,border:`1.5px solid ${ptype.border}`,background:ptype.bg,color:ptype.color,fontSize:11,fontWeight:700,cursor:"pointer"}}>
+            + Apply to be Verified
+          </button>
+        </div>
+
+        {/* Cards */}
+        {filtered.length===0?(
+          <div style={{textAlign:"center",padding:"60px 24px",background:"white",borderRadius:16,border:"1.5px solid #e5e7eb"}}>
+            <div style={{fontSize:40,marginBottom:12}}>{ptype.icon}</div>
+            <div style={{fontSize:15,fontWeight:700,color:"#111827",marginBottom:8}}>No {ptype.label.toLowerCase()}s found</div>
+            <div style={{fontSize:12,color:"#9ca3af",marginBottom:20}}>
+              {stateFilter!=="ALL"?`We don't have verified ${ptype.label.toLowerCase()}s in ${stateFilter} yet.`:"Try adjusting your search."}
+            </div>
+            <button onClick={()=>{setApplyType(activeType);setApplyModal(true);}}
+              style={{padding:"10px 20px",borderRadius:8,border:"none",background:"#111827",color:"white",fontSize:12,fontWeight:700,cursor:"pointer"}}>
+              Be the first → Apply for Verification
+            </button>
+          </div>
+        ):(
+          <div style={{display:"flex",flexDirection:"column",gap:12}}>
+            {filtered.map(pro=><ProCard key={pro.id} pro={pro} onContact={()=>{}}/>)}
+          </div>
+        )}
+
+        {/* Apply Modal */}
+        {applyModal&&(
+          <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:20}} onClick={()=>setApplyModal(false)}>
+            <div style={{background:"white",borderRadius:20,padding:"28px",maxWidth:520,width:"100%",maxHeight:"85vh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
+              {applySubmitted?(
+                <div style={{textAlign:"center",padding:"20px 0"}}>
+                  <div style={{fontSize:48,marginBottom:16}}>🎉</div>
+                  <h2 style={{fontFamily:"'Fraunces',serif",fontSize:22,fontWeight:900,color:"#111827",marginBottom:8}}>Application Received!</h2>
+                  <p style={{fontSize:13,color:"#6b7280",lineHeight:1.6,marginBottom:20}}>Our team reviews applications within 3–5 business days. You'll hear from us at the email you provided.</p>
+                  <button onClick={()=>{setApplyModal(false);setApplySubmitted(false);setApplyForm({name:"",email:"",phone:"",bio:"",states:[],website:""}); }}
+                    style={{padding:"10px 24px",borderRadius:8,border:"none",background:"#111827",color:"white",fontSize:13,fontWeight:700,cursor:"pointer"}}>Done</button>
+                </div>
+              ):(
+                <>
+                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:20}}>
+                    <div>
+                      <h2 style={{fontFamily:"'Fraunces',serif",fontSize:18,fontWeight:900,color:"#111827",marginBottom:4}}>Apply for Verification</h2>
+                      <div style={{fontSize:11,color:"#9ca3af"}}>
+                        {PROF_TYPES.find(p=>p.id===applyType)?.badge} — free to apply
+                      </div>
+                    </div>
+                    <button onClick={()=>setApplyModal(false)} style={{background:"none",border:"none",fontSize:20,color:"#9ca3af",cursor:"pointer",lineHeight:1}}>✕</button>
+                  </div>
+
+                  <div style={{display:"flex",flexDirection:"column",gap:12}}>
+                    {/* Prof type selector */}
+                    <div>
+                      <label style={{fontSize:11,fontWeight:700,color:"#374151",display:"block",marginBottom:6}}>I am a</label>
+                      <div style={{display:"flex",gap:8}}>
+                        {PROF_TYPES.map(pt=>(
+                          <button key={pt.id} onClick={()=>setApplyType(pt.id)}
+                            style={{flex:1,padding:"8px",borderRadius:8,border:`1.5px solid ${applyType===pt.id?pt.border:"#e5e7eb"}`,
+                              background:applyType===pt.id?pt.bg:"white",color:applyType===pt.id?pt.color:"#6b7280",
+                              fontSize:11,fontWeight:700,cursor:"pointer",textAlign:"center"}}>
+                            {pt.icon} {pt.label.slice(0,-1)}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+                      {[["Business / Full Name *","name","text"],["Email *","email","email"],["Phone","phone","tel"],["Website / LinkedIn","website","text"]].map(([label,key,type])=>(
+                        <div key={key} style={{gridColumn:key==="name"||key==="email"?"":""}}>
+                          <label style={{fontSize:11,fontWeight:600,color:"#374151",display:"block",marginBottom:4}}>{label}</label>
+                          <input type={type} value={applyForm[key]} onChange={e=>setApplyForm(f=>({...f,[key]:e.target.value}))}
+                            style={{width:"100%",padding:"9px 12px",borderRadius:8,border:"1.5px solid #e5e7eb",fontSize:13,color:"#111827",outline:"none",boxSizing:"border-box",fontFamily:"'DM Sans',sans-serif"}}/>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div>
+                      <label style={{fontSize:11,fontWeight:600,color:"#374151",display:"block",marginBottom:4}}>Tell us about your experience & credentials *</label>
+                      <textarea value={applyForm.bio} onChange={e=>setApplyForm(f=>({...f,bio:e.target.value}))}
+                        rows={3} placeholder="Years in business, notable projects, licenses, volume handled..."
+                        style={{width:"100%",padding:"9px 12px",borderRadius:8,border:"1.5px solid #e5e7eb",fontSize:13,color:"#111827",outline:"none",resize:"vertical",fontFamily:"'DM Sans',sans-serif",boxSizing:"border-box"}}/>
+                    </div>
+
+                    <div>
+                      <label style={{fontSize:11,fontWeight:600,color:"#374151",display:"block",marginBottom:6}}>States you operate in *</label>
+                      <div style={{display:"flex",flexWrap:"wrap",gap:4,maxHeight:120,overflowY:"auto",padding:4,border:"1.5px solid #e5e7eb",borderRadius:8,background:"#fafafa"}}>
+                        {US_STATES_LIST.map(s=>(
+                          <button key={s} onClick={()=>toggleState(s)}
+                            style={{padding:"3px 9px",borderRadius:100,border:`1px solid ${applyForm.states.includes(s)?"#10b981":"#e5e7eb"}`,
+                              background:applyForm.states.includes(s)?"#f0fdf4":"white",
+                              color:applyForm.states.includes(s)?"#059669":"#6b7280",
+                              fontSize:10,fontWeight:700,cursor:"pointer"}}>
+                            {s}
+                          </button>
+                        ))}
+                      </div>
+                      {applyForm.states.length>0&&<div style={{fontSize:10,color:"#059669",marginTop:4}}>{applyForm.states.length} state{applyForm.states.length>1?"s":""} selected</div>}
+                    </div>
+
+                    <button
+                      onClick={()=>{if(!applyForm.name||!applyForm.email||!applyForm.bio||applyForm.states.length===0){alert("Please fill in all required fields and select at least one state.");return;}setApplySubmitted(true);}}
+                      style={{padding:"12px",borderRadius:10,border:"none",background:"linear-gradient(135deg,#064e3b,#065f46)",color:"white",fontSize:13,fontWeight:700,cursor:"pointer",marginTop:4}}>
+                      Submit Application →
+                    </button>
+                    <p style={{fontSize:10,color:"#9ca3af",textAlign:"center",margin:0}}>Free to apply · Reviewed within 3–5 business days · No guarantee of acceptance</p>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+
 function LandingPage({onGoSignIn,onGoSignUp}) {
   const [mode,setMode]=useState("rental");const [scrolled,setScrolled]=useState(false);
   const [mobileMenu,setMobileMenu]=useState(false);
@@ -6416,7 +6989,7 @@ function LandingPage({onGoSignIn,onGoSignUp}) {
           <Logo/>
           {/* Desktop nav links */}
           <div style={{display:"flex",gap:24}} className="hide-mobile">
-            {["Features","Community","Mentoring","Pricing"].map(l=>(
+            {["Features","Professionals","Community","Mentoring","Pricing"].map(l=>(
               <button key={l} onClick={()=>{const el=document.getElementById(l.toLowerCase());if(el)el.scrollIntoView({behavior:"smooth",block:"start"});}} style={{background:"none",border:"none",fontSize:14,color:"#6b7280",fontWeight:500,cursor:"pointer",padding:0}}>{l}</button>
             ))}
           </div>
@@ -6438,7 +7011,7 @@ function LandingPage({onGoSignIn,onGoSignUp}) {
         {/* Mobile dropdown menu */}
         {mobileMenu&&(
           <div style={{background:"white",borderTop:"1px solid #f3f4f6",padding:"16px 20px",display:"flex",flexDirection:"column",gap:4}}>
-            {["Features","Community","Mentoring","Pricing"].map(l=>(
+            {["Features","Professionals","Community","Mentoring","Pricing"].map(l=>(
               <button key={l} onClick={()=>{setMobileMenu(false);const el=document.getElementById(l.toLowerCase());if(el)el.scrollIntoView({behavior:"smooth",block:"start"});}} style={{background:"none",border:"none",fontSize:15,color:"#374151",fontWeight:500,cursor:"pointer",padding:"10px 0",textAlign:"left",borderBottom:"1px solid #f9fafb"}}>{l}</button>
             ))}
             <button onClick={onGoSignUp} style={{marginTop:8,padding:"12px",borderRadius:10,border:"none",background:"#10b981",color:"white",fontSize:14,fontWeight:700,cursor:"pointer"}}>Start Free Trial →</button>
@@ -6731,7 +7304,40 @@ function LandingPage({onGoSignIn,onGoSignUp}) {
       </section>
 
       {/* Mentoring preview */}
-      <section id="mentoring" style={{padding:"60px 20px",background:"#f9fafb",borderTop:"1px solid #e5e7eb"}}>
+            {/* ── Verified Professionals ──────────────────────────────────────────── */}
+      <section style={{padding:"60px 20px",background:"white"}}>
+        <div style={{maxWidth:1000,margin:"0 auto"}}>
+          <div style={{textAlign:"center",marginBottom:40}}>
+            <div style={{fontSize:11,fontWeight:800,color:"#059669",letterSpacing:"0.12em",textTransform:"uppercase",marginBottom:10}}>PLATFORM VERIFIED</div>
+            <h2 style={{fontFamily:"'Fraunces',serif",fontSize:"clamp(24px,3.5vw,36px)",fontWeight:900,color:"#111827",marginBottom:12}}>Your deal team, already vetted</h2>
+            <p style={{fontSize:15,color:"#6b7280",maxWidth:500,margin:"0 auto"}}>Every lender, contractor, and realtor on DealSource has been reviewed by our team and is filtered by your state.</p>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))",gap:20,marginBottom:32}}>
+            {[
+              {icon:"🏦",title:"Verified Lenders",desc:"Hard money, DSCR, bridge, and private lenders who understand investor timelines. Get term sheets fast.",color:"#1d4ed8",bg:"#eff6ff",border:"#bfdbfe",count:"12+ lenders"},
+              {icon:"🔨",title:"Verified Contractors",desc:"GCs and trade specialists vetted for fix & flip, BRRRR, and multi-family. Scope bids within 48 hours.",color:"#b45309",bg:"#fffbeb",border:"#fde68a",count:"9+ contractors"},
+              {icon:"🏠",title:"Verified Realtors",desc:"Investor-friendly agents who run real ARV comps and find off-market deals before they hit the MLS.",color:"#059669",bg:"#f0fdf4",border:"#6ee7b7",count:"11+ realtors"},
+            ].map(({icon,title,desc,color,bg,border,count})=>(
+              <div key={title} style={{background:bg,borderRadius:16,padding:"24px",border:`1.5px solid ${border}`}}>
+                <div style={{fontSize:32,marginBottom:12}}>{icon}</div>
+                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+                  <span style={{fontSize:14,fontWeight:800,color:"#111827"}}>{title}</span>
+                  <span style={{fontSize:9,fontWeight:700,color,background:"white",padding:"2px 8px",borderRadius:100,border:`1px solid ${border}`}}>✓ Verified</span>
+                </div>
+                <p style={{fontSize:12,color:"#6b7280",lineHeight:1.6,marginBottom:12}}>{desc}</p>
+                <span style={{fontSize:11,fontWeight:700,color}}>{count} nationwide · Filter by state →</span>
+              </div>
+            ))}
+          </div>
+          <div style={{textAlign:"center"}}>
+            <button onClick={onGoSignUp} style={{padding:"13px 32px",borderRadius:10,border:"none",background:"linear-gradient(135deg,#064e3b,#065f46)",color:"white",fontSize:13,fontWeight:700,cursor:"pointer"}}>
+              Find Professionals in Your State →
+            </button>
+          </div>
+        </div>
+      </section>
+
+<section id="mentoring" style={{padding:"60px 20px",background:"#f9fafb",borderTop:"1px solid #e5e7eb"}}>
         <div className="mentoring-grid" style={{maxWidth:1100,margin:"0 auto",display:"grid",gridTemplateColumns:"1fr 1fr",gap:48,alignItems:"center"}}>
           <div>
             <p style={{fontSize:11,fontWeight:700,letterSpacing:"0.12em",color:"#10b981",textTransform:"uppercase",marginBottom:12}}>Mentoring</p>
@@ -6963,6 +7569,7 @@ function AnalyzerApp({user,profile,onGoHome,onGoProfile,onSignOut}) {
     {key:"calc",label:"Calculator",icon:"⚡"},
     {key:"deals",label:`Saved (${deals.length})`,icon:"💾"},
     {key:"forum",label:"Community",icon:"👥"},
+    {key:"pros",label:"Professionals",icon:"✅"},
     {key:"leaderboard",label:"Leaderboard",icon:"🏆"},
     {key:"mentors",label:"Mentors",icon:"🎓"},
   ];
@@ -7090,7 +7697,8 @@ function AnalyzerApp({user,profile,onGoHome,onGoProfile,onSignOut}) {
         </div>
       )}
 
-      {view==="forum"&&<ForumView user={user} profile={profile} savedDeals={deals||[]} isPro={isPro}/>}
+      {view==="forum"&&<ForumView user={user} profile={profile} savedDeals={deals||[]} isPro={isPro} onActivatePro={()=>setIsPro(true)}/>}
+      {view==="pros"&&<VerifiedProsView user={user} profile={profile}/>}
       {view==="leaderboard"&&<LeaderboardView user={user} profile={profile} onGoProfile={onGoProfile}/>}
       {view==="mentors"&&<MentorDirectory user={user} profile={profile}/>}
 
@@ -7157,6 +7765,6 @@ export default function Root() {
     {page==="signin"&&<SignInPage onSignIn={handleSignIn} onGoSignUp={()=>setPage("signup")} onGoHome={()=>setPage("home")}/>}
     {page==="signup"&&<SignUpPage onSignIn={handleSignIn} onGoSignIn={()=>setPage("signin")} onGoHome={()=>setPage("home")}/>}
     {page==="app"&&user&&<AnalyzerApp user={user} profile={profile} onGoHome={()=>setPage("home")} onGoProfile={()=>setPage("profile")} onSignOut={handleSignOut}/>}
-    {page==="profile"&&user&&<ProfilePage user={user} profile={profile} onUpdate={handleProfileUpdate} onSignOut={handleSignOut} onBack={()=>setPage("app")}/>}
+    {page==="profile"&&user&&<ProfilePage user={user} profile={profile} isPro={isPro} onActivatePro={()=>setIsPro(true)} onUpdate={handleProfileUpdate} onSignOut={handleSignOut} onBack={()=>setPage("app")}/>}
   </>);
 }
